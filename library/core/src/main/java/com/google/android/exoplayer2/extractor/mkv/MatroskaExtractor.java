@@ -21,6 +21,7 @@ import android.util.SparseArray;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.ParserException;
+import com.google.android.exoplayer2.audio.Ac3Util;
 import com.google.android.exoplayer2.drm.DrmInitData;
 import com.google.android.exoplayer2.drm.DrmInitData.SchemeData;
 import com.google.android.exoplayer2.extractor.ChunkIndex;
@@ -279,6 +280,7 @@ public final class MatroskaExtractor implements Extractor {
   private final ParsableByteArray encryptionInitializationVector;
   private final ParsableByteArray encryptionSubsampleData;
   private ByteBuffer encryptionSubsampleDataBuffer;
+  private final TrueHDSampleHolder samplesTrueHD;
 
   private long segmentContentSize;
   private long segmentContentPosition = C.POSITION_UNSET;
@@ -316,6 +318,8 @@ public final class MatroskaExtractor implements Extractor {
   private int blockTrackNumberLength;
   @C.BufferFlags
   private int blockFlags;
+
+  private int lastReadResult = Extractor.RESULT_CONTINUE;
 
   // Sample reading state.
   private int sampleBytesRead;
@@ -356,6 +360,7 @@ public final class MatroskaExtractor implements Extractor {
     subripSample = new ParsableByteArray();
     encryptionInitializationVector = new ParsableByteArray(ENCRYPTION_IV_SIZE);
     encryptionSubsampleData = new ParsableByteArray();
+    samplesTrueHD = new TrueHDSampleHolder();
   }
 
   @Override
@@ -375,6 +380,7 @@ public final class MatroskaExtractor implements Extractor {
     reader.reset();
     varintReader.reset();
     resetSample();
+    samplesTrueHD.reset();
   }
 
   @Override
@@ -390,10 +396,12 @@ public final class MatroskaExtractor implements Extractor {
     while (continueReading && !sampleRead) {
       continueReading = reader.read(input);
       if (continueReading && maybeSeekForCues(seekPosition, input.getPosition())) {
-        return Extractor.RESULT_SEEK;
+        lastReadResult = Extractor.RESULT_SEEK;
+        return lastReadResult;
       }
     }
-    return continueReading ? Extractor.RESULT_CONTINUE : Extractor.RESULT_END_OF_INPUT;
+    lastReadResult = continueReading ? Extractor.RESULT_CONTINUE : Extractor.RESULT_END_OF_INPUT;
+    return lastReadResult;
   }
 
   /* package */ int getElementType(int id) {
@@ -1039,10 +1047,16 @@ public final class MatroskaExtractor implements Extractor {
   }
 
   private void commitSampleToOutput(Track track, long timeUs) {
-    if (CODEC_ID_SUBRIP.equals(track.codecId)) {
-      writeSubripSample(track);
+
+    if (CODEC_ID_TRUEHD.equals(track.codecId)) {
+        samplesTrueHD.commit(timeUs, lastReadResult == RESULT_END_OF_INPUT);
     }
-    track.output.sampleMetadata(timeUs, blockFlags, sampleBytesWritten, 0, track.cryptoData);
+    else {
+      if (CODEC_ID_SUBRIP.equals(track.codecId)) {
+        writeSubripSample(track);
+      }
+      track.output.sampleMetadata(timeUs, blockFlags, sampleBytesWritten, 0, track.cryptoData);
+    }
     sampleRead = true;
     resetSample();
   }
@@ -1216,6 +1230,9 @@ public final class MatroskaExtractor implements Extractor {
         }
       }
     } else {
+      if (CODEC_ID_TRUEHD.equals(track.codecId))
+        samplesTrueHD.testSample(input, size, blockFlags, track);
+
       while (sampleBytesRead < size) {
         readToOutput(input, output, size - sampleBytesRead);
       }
@@ -1865,6 +1882,70 @@ public final class MatroskaExtractor implements Extractor {
       }
     }
 
+  }
+
+  private class TrueHDSampleHolder {
+
+    private int counter;
+    private int samplesSize;
+    private long timeUs;
+    private @C.BufferFlags int blockFlags;
+    private boolean gotSyncFrame;
+    private boolean letFirstIn;
+    private Track track;
+
+    TrueHDSampleHolder() {
+      reset();
+    }
+
+    private boolean isFirstSampleCheck() {
+      return counter == 1;
+    }
+
+    private void resetCounters() {
+      track = null;
+      counter = 0;
+      samplesSize = 0;
+      timeUs = 0;
+      blockFlags = 0;
+    }
+
+    void reset() {
+      gotSyncFrame = false;
+      letFirstIn = true;
+      resetCounters();
+    }
+
+    void testSample(ExtractorInput input, int size, @C.BufferFlags int blockFlags, Track track)
+            throws IOException, InterruptedException {
+      samplesSize += size;
+      ++counter;
+      if (isFirstSampleCheck())
+        this.blockFlags = blockFlags;
+      if (!gotSyncFrame) {
+        byte[] bytes = new byte[12];
+        input.peekFully(bytes, 0, 12);
+        input.resetPeekPosition();
+        if (0 < Ac3Util.parseTrueHDSyncframeAudioSampleCount(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN))) {
+          gotSyncFrame = true;
+          letFirstIn = false;
+        }
+      }
+      this.track = track;
+    }
+
+    boolean commit(long timeUs, boolean forceCommit) {
+      if (isFirstSampleCheck())
+        this.timeUs = timeUs;
+
+      boolean commit = counter == Ac3Util.TRUEHD_SAMPLE_COMMIT_COUNT || letFirstIn || forceCommit;
+      if (commit) {
+        if (track != null && samplesSize > 0)
+          track.output.sampleMetadata(this.timeUs, blockFlags, samplesSize, 0, track.cryptoData);
+        resetCounters();
+      }
+      return commit;
+    }
   }
 
 }

@@ -1437,6 +1437,8 @@ public final class AudioTrack {
         return C.ENCODING_DTS;
       case MimeTypes.AUDIO_DTS_HD:
         return C.ENCODING_DTS_HD;
+      case MimeTypes.AUDIO_TRUEHD:
+        return C.ENCODING_TRUE_HD;
       default:
         return C.ENCODING_INVALID;
     }
@@ -1449,6 +1451,8 @@ public final class AudioTrack {
       return Ac3Util.getAc3SyncframeAudioSampleCount();
     } else if (encoding == C.ENCODING_E_AC3) {
       return Ac3Util.parseEAc3SyncframeAudioSampleCount(buffer);
+    } else if (encoding == C.ENCODING_TRUE_HD) {
+      return Ac3Util.parseTrueHDSyncframeAudioSampleCount(buffer);
     } else {
       throw new IllegalStateException("Unexpected audio encoding: " + encoding);
     }
