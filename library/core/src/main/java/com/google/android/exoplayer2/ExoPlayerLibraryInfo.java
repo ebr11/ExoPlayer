@@ -30,7 +30,7 @@ public interface ExoPlayerLibraryInfo {
    * The version of the library expressed as {@code "ExoPlayerLib/" + VERSION}.
    */
   // Intentionally hardcoded. Do not derive from other constants (e.g. VERSION) or vice versa.
-  String VERSION_SLASHY = "ExoPlayerLib/2.4.3";
+  String VERSION_SLASHY = "ExoPlayerLib/2.4.3/Emby";
 
   /**
    * The version of the library expressed as an integer, for example 1002003.
