@@ -10,6 +10,7 @@ package com.google.android.exoplayer2.text.pgs;
 
 
         import android.graphics.Bitmap;
+        import android.util.Log;
 
         import com.google.android.exoplayer2.text.Cue;
         import com.google.android.exoplayer2.text.Subtitle;
@@ -62,8 +63,8 @@ class PgsBuilder {
                 holder = new Holder();
                 break;
             default:
-                //Log.i("PgsBuilder","Skipping bytes: "+Math.min(sectionLength, buffer.bytesLeft()));
-                //Log.i("PgsBuilder","ID was: "+sectionId);
+                Log.i("PgsBuilder","Skipping bytes: "+Math.min(sectionLength, buffer.bytesLeft()));
+                Log.i("PgsBuilder","ID was: "+sectionId);
                 buffer.skipBytes(Math.min(sectionLength, buffer.bytesLeft()));
                 break;
         }

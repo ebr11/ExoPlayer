@@ -18,7 +18,7 @@ public class PgsDecoder extends SimpleSubtitleDecoder {
     @Override
     protected Subtitle decode(byte[] data, int size, boolean reset) throws SubtitleDecoderException {
         ParsableByteArray buffer = new ParsableByteArray(data, size);
-        Log.i("PgsDecoder","**** Decoding PGS subs. Size: "+Integer.toString(size));
+        //Log.i("PgsDecoder","**** Decoding PGS subs. Size: "+Integer.toString(size));
         PgsBuilder builder = new PgsBuilder();
         do {
             if (!builder.readNextSection(buffer))
