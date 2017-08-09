@@ -19,8 +19,7 @@ import static junit.framework.Assert.assertEquals;
 
 import android.net.Uri;
 import android.test.MoreAsserts;
-import com.google.android.exoplayer2.testutil.FakeDataSource.FakeData;
-import com.google.android.exoplayer2.testutil.FakeDataSource.FakeDataSet;
+import com.google.android.exoplayer2.testutil.FakeDataSet.FakeData;
 import com.google.android.exoplayer2.upstream.DataSourceInputStream;
 import com.google.android.exoplayer2.upstream.DataSpec;
 import com.google.android.exoplayer2.upstream.DummyDataSource;
@@ -29,6 +28,7 @@ import com.google.android.exoplayer2.upstream.cache.CacheDataSource;
 import com.google.android.exoplayer2.upstream.cache.CacheUtil;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import junit.framework.Assert;
 
 /**
@@ -38,31 +38,38 @@ public final class CacheAsserts {
 
   /** Asserts that the cache content is equal to the data in the {@code fakeDataSet}. */
   public static void assertCachedData(Cache cache, FakeDataSet fakeDataSet) throws IOException {
+    ArrayList<FakeData> allData = fakeDataSet.getAllData();
+    String[] uriStrings = new String[allData.size()];
+    for (int i = 0; i < allData.size(); i++) {
+      uriStrings[i] = allData.get(i).uri;
+    }
+    assertCachedData(cache, fakeDataSet, uriStrings);
+  }
+
+  /**
+   * Asserts that the cache content is equal to the given subset of data in the {@code fakeDataSet}.
+   */
+  public static void assertCachedData(Cache cache, FakeDataSet fakeDataSet, String... uriStrings)
+      throws IOException {
     int totalLength = 0;
-    for (FakeData fakeData : fakeDataSet.getAllData()) {
-      byte[] data = fakeData.getData();
-      assertCachedData(cache, fakeData.uri, data);
+    for (String uriString : uriStrings) {
+      byte[] data = fakeDataSet.getData(uriString).getData();
+      assertDataCached(cache, uriString, data);
       totalLength += data.length;
     }
     assertEquals(totalLength, cache.getCacheSpace());
   }
 
-  /**
-   * Asserts that the cache content for the given {@code uriStrings} are equal to the data in the
-   * {@code fakeDataSet}.
-   */
-  public static void assertCachedData(Cache cache, FakeDataSet fakeDataSet, String... uriStrings)
+  /** Asserts that the cache contains the given subset of data in the {@code fakeDataSet}. */
+  public static void assertDataCached(Cache cache, FakeDataSet fakeDataSet, String... uriStrings)
       throws IOException {
     for (String uriString : uriStrings) {
-      assertCachedData(cache, uriString, fakeDataSet.getData(uriString).getData());
+      assertDataCached(cache, uriString, fakeDataSet.getData(uriString).getData());
     }
   }
 
-  /**
-   * Asserts that the cache content for the given {@code uriString} is equal to the {@code
-   * expected}.
-   */
-  public static void assertCachedData(Cache cache, String uriString, byte[] expected)
+  /** Asserts that the cache contains the given data for {@code uriString}. */
+  public static void assertDataCached(Cache cache, String uriString, byte[] expected)
       throws IOException {
     CacheDataSource dataSource = new CacheDataSource(cache, DummyDataSource.INSTANCE, 0);
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -85,18 +92,14 @@ public final class CacheAsserts {
   }
 
   /** Asserts that there is no cache content for the given {@code uriStrings}. */
-  public static void assertNoCachedData(Cache cache, String... uriStrings) {
+  public static void assertDataNotCached(Cache cache, String... uriStrings) {
     for (String uriString : uriStrings) {
       Assert.assertNull("There is cached data for '" + uriString + "',",
           cache.getCachedSpans(CacheUtil.generateKey(Uri.parse(uriString))));
     }
   }
 
-  /**
-   * Asserts that the cache is empty.
-   *
-   * @param cache
-   */
+  /** Asserts that the cache is empty. */
   public static void assertCacheEmpty(Cache cache) {
     assertEquals(0, cache.getCacheSpace());
   }
