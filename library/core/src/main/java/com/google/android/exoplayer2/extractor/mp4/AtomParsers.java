@@ -678,7 +678,8 @@ import java.util.List;
           parent, position, size);
       if (sampleEntryEncryptionData != null) {
         atomType = sampleEntryEncryptionData.first;
-        drmInitData = drmInitData.copyWithSchemeType(sampleEntryEncryptionData.second.schemeType);
+        drmInitData = drmInitData == null ? null
+            : drmInitData.copyWithSchemeType(sampleEntryEncryptionData.second.schemeType);
         out.trackEncryptionBoxes[entryIndex] = sampleEntryEncryptionData.second;
       }
       parent.setPosition(childPosition);
@@ -815,7 +816,7 @@ import java.util.List;
 
   private static void parseAudioSampleEntry(ParsableByteArray parent, int atomType, int position,
       int size, int trackId, String language, boolean isQuickTime, DrmInitData drmInitData,
-      StsdData out, int entryIndex) {
+      StsdData out, int entryIndex) throws ParserException {
     parent.setPosition(position + Atom.HEADER_SIZE + StsdData.STSD_HEADER_SIZE);
 
     int quickTimeSoundDescriptionVersion = 0;
@@ -857,7 +858,8 @@ import java.util.List;
           parent, position, size);
       if (sampleEntryEncryptionData != null) {
         atomType = sampleEntryEncryptionData.first;
-        drmInitData = drmInitData.copyWithSchemeType(sampleEntryEncryptionData.second.schemeType);
+        drmInitData = drmInitData == null ? null
+            : drmInitData.copyWithSchemeType(sampleEntryEncryptionData.second.schemeType);
         out.trackEncryptionBoxes[entryIndex] = sampleEntryEncryptionData.second;
       }
       parent.setPosition(childPosition);

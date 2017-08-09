@@ -141,7 +141,7 @@ public class SimpleExoPlayer implements ExoPlayer {
     videoScalingMode = C.VIDEO_SCALING_MODE_DEFAULT;
 
     // Build the player and associated objects.
-    player = new ExoPlayerImpl(renderers, trackSelector, loadControl);
+    player = createExoPlayerImpl(renderers, trackSelector, loadControl);
   }
 
   /**
@@ -276,7 +276,8 @@ public class SimpleExoPlayer implements ExoPlayer {
         Log.w(TAG, "Replacing existing SurfaceTextureListener.");
       }
       textureView.setSurfaceTextureListener(componentListener);
-      SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
+      SurfaceTexture surfaceTexture = textureView.isAvailable() ? textureView.getSurfaceTexture()
+          : null;
       setVideoSurfaceInternal(surfaceTexture == null ? null : new Surface(surfaceTexture), true);
     }
   }
@@ -524,12 +525,12 @@ public class SimpleExoPlayer implements ExoPlayer {
   }
 
   @Override
-  public void addListener(EventListener listener) {
+  public void addListener(Player.EventListener listener) {
     player.addListener(listener);
   }
 
   @Override
-  public void removeListener(EventListener listener) {
+  public void removeListener(Player.EventListener listener) {
     player.removeListener(listener);
   }
 
@@ -715,7 +716,25 @@ public class SimpleExoPlayer implements ExoPlayer {
     return player.getCurrentAdIndexInAdGroup();
   }
 
+  @Override
+  public long getContentPosition() {
+    return player.getContentPosition();
+  }
+
   // Internal methods.
+
+  /**
+   * Creates the ExoPlayer implementation used by this {@link SimpleExoPlayer}.
+   *
+   * @param renderers The {@link Renderer}s that will be used by the instance.
+   * @param trackSelector The {@link TrackSelector} that will be used by the instance.
+   * @param loadControl The {@link LoadControl} that will be used by the instance.
+   * @return A new {@link ExoPlayer} instance.
+   */
+  protected ExoPlayer createExoPlayerImpl(Renderer[] renderers, TrackSelector trackSelector,
+      LoadControl loadControl) {
+    return new ExoPlayerImpl(renderers, trackSelector, loadControl);
+  }
 
   private void removeSurfaceCallbacks() {
     if (textureView != null) {
@@ -743,12 +762,12 @@ public class SimpleExoPlayer implements ExoPlayer {
       }
     }
     if (this.surface != null && this.surface != surface) {
-      // If we created this surface, we are responsible for releasing it.
+      // We're replacing a surface. Block to ensure that it's not accessed after the method returns.
+      player.blockingSendMessages(messages);
+      // If we created the previous surface, we are responsible for releasing it.
       if (this.ownsSurface) {
         this.surface.release();
       }
-      // We're replacing a surface. Block to ensure that it's not accessed after the method returns.
-      player.blockingSendMessages(messages);
     } else {
       player.sendMessages(messages);
     }

@@ -268,7 +268,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   @Override
   public boolean isReady() {
     if (super.isReady() && (renderedFirstFrame || (dummySurface != null && surface == dummySurface)
-        || getCodec() == null)) {
+        || getCodec() == null || tunneling)) {
       // Ready. If we were joining then we've now joined, so clear the joining deadline.
       joiningDeadlineMs = C.TIME_UNSET;
       return true;
@@ -477,7 +477,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
       Format oldFormat, Format newFormat) {
     return areAdaptationCompatible(codecIsAdaptive, oldFormat, newFormat)
         && newFormat.width <= codecMaxValues.width && newFormat.height <= codecMaxValues.height
-        && newFormat.maxInputSize <= codecMaxValues.inputSize;
+        && getMaxInputSize(newFormat) <= codecMaxValues.inputSize;
   }
 
   @Override
@@ -700,9 +700,10 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   }
 
   private void maybeNotifyVideoSizeChanged() {
-    if (reportedWidth != currentWidth || reportedHeight != currentHeight
+    if ((currentWidth != Format.NO_VALUE || currentHeight != Format.NO_VALUE)
+      && (reportedWidth != currentWidth || reportedHeight != currentHeight
         || reportedUnappliedRotationDegrees != currentUnappliedRotationDegrees
-        || reportedPixelWidthHeightRatio != currentPixelWidthHeightRatio) {
+        || reportedPixelWidthHeightRatio != currentPixelWidthHeightRatio)) {
       eventDispatcher.videoSizeChanged(currentWidth, currentHeight, currentUnappliedRotationDegrees,
           currentPixelWidthHeightRatio);
       reportedWidth = currentWidth;
@@ -714,8 +715,8 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
 
   private void maybeRenotifyVideoSizeChanged() {
     if (reportedWidth != Format.NO_VALUE || reportedHeight != Format.NO_VALUE) {
-      eventDispatcher.videoSizeChanged(currentWidth, currentHeight, currentUnappliedRotationDegrees,
-          currentPixelWidthHeightRatio);
+      eventDispatcher.videoSizeChanged(reportedWidth, reportedHeight,
+          reportedUnappliedRotationDegrees, reportedPixelWidthHeightRatio);
     }
   }
 
@@ -853,18 +854,27 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   }
 
   /**
-   * Returns a maximum input size for a given format.
+   * Returns a maximum input buffer size for a given format.
    *
    * @param format The format.
-   * @return A maximum input size in bytes, or {@link Format#NO_VALUE} if a maximum could not be
-   *     determined.
+   * @return A maximum input buffer size in bytes, or {@link Format#NO_VALUE} if a maximum could not
+   *     be determined.
    */
   private static int getMaxInputSize(Format format) {
     if (format.maxInputSize != Format.NO_VALUE) {
-      // The format defines an explicit maximum input size.
-      return format.maxInputSize;
+      // The format defines an explicit maximum input size. Add the total size of initialization
+      // data buffers, as they may need to be queued in the same input buffer as the largest sample.
+      int totalInitializationDataSize = 0;
+      int initializationDataCount = format.initializationData.size();
+      for (int i = 0; i < initializationDataCount; i++) {
+        totalInitializationDataSize += format.initializationData.get(i).length;
+      }
+      return format.maxInputSize + totalInitializationDataSize;
+    } else {
+      // Calculated maximum input sizes are overestimates, so it's not necessary to add the size of
+      // initialization data.
+      return getMaxInputSize(format.sampleMimeType, format.width, format.height);
     }
-    return getMaxInputSize(format.sampleMimeType, format.width, format.height);
   }
 
   /**

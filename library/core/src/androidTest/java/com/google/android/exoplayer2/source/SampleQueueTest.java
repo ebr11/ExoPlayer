@@ -93,10 +93,10 @@ public class SampleQueueTest extends TestCase {
     inputBuffer = null;
   }
 
-  public void testDisableReleasesAllocations() {
+  public void testResetReleasesAllocations() {
     writeTestData();
     assertAllocationCount(10);
-    sampleQueue.disable();
+    sampleQueue.reset();
     assertAllocationCount(0);
   }
 
@@ -258,45 +258,45 @@ public class SampleQueueTest extends TestCase {
 
   public void testAdvanceToBeforeBuffer() {
     writeTestData();
-    boolean result = sampleQueue.advanceTo(TEST_SAMPLE_TIMESTAMPS[0] - 1, true, false);
+    int skipCount = sampleQueue.advanceTo(TEST_SAMPLE_TIMESTAMPS[0] - 1, true, false);
     // Should fail and have no effect.
-    assertFalse(result);
+    assertEquals(SampleQueue.ADVANCE_FAILED, skipCount);
     assertReadTestData();
     assertNoSamplesToRead(TEST_FORMAT_2);
   }
 
   public void testAdvanceToStartOfBuffer() {
     writeTestData();
-    boolean result = sampleQueue.advanceTo(TEST_SAMPLE_TIMESTAMPS[0], true, false);
+    int skipCount = sampleQueue.advanceTo(TEST_SAMPLE_TIMESTAMPS[0], true, false);
     // Should succeed but have no effect (we're already at the first frame).
-    assertTrue(result);
+    assertEquals(0, skipCount);
     assertReadTestData();
     assertNoSamplesToRead(TEST_FORMAT_2);
   }
 
   public void testAdvanceToEndOfBuffer() {
     writeTestData();
-    boolean result = sampleQueue.advanceTo(LAST_SAMPLE_TIMESTAMP, true, false);
-    // Should succeed and skip to 2nd keyframe.
-    assertTrue(result);
+    int skipCount = sampleQueue.advanceTo(LAST_SAMPLE_TIMESTAMP, true, false);
+    // Should succeed and skip to 2nd keyframe (the 4th frame).
+    assertEquals(4, skipCount);
     assertReadTestData(null, TEST_DATA_SECOND_KEYFRAME_INDEX);
     assertNoSamplesToRead(TEST_FORMAT_2);
   }
 
   public void testAdvanceToAfterBuffer() {
     writeTestData();
-    boolean result = sampleQueue.advanceTo(LAST_SAMPLE_TIMESTAMP + 1, true, false);
+    int skipCount = sampleQueue.advanceTo(LAST_SAMPLE_TIMESTAMP + 1, true, false);
     // Should fail and have no effect.
-    assertFalse(result);
+    assertEquals(SampleQueue.ADVANCE_FAILED, skipCount);
     assertReadTestData();
     assertNoSamplesToRead(TEST_FORMAT_2);
   }
 
   public void testAdvanceToAfterBufferAllowed() {
     writeTestData();
-    boolean result = sampleQueue.advanceTo(LAST_SAMPLE_TIMESTAMP + 1, true, true);
-    // Should succeed and skip to 2nd keyframe.
-    assertTrue(result);
+    int skipCount = sampleQueue.advanceTo(LAST_SAMPLE_TIMESTAMP + 1, true, true);
+    // Should succeed and skip to 2nd keyframe (the 4th frame).
+    assertEquals(4, skipCount);
     assertReadTestData(null, TEST_DATA_SECOND_KEYFRAME_INDEX);
     assertNoSamplesToRead(TEST_FORMAT_2);
   }
@@ -545,8 +545,8 @@ public class SampleQueueTest extends TestCase {
   }
 
   /**
-   * Asserts {@link SampleQueue#readData} is behaving correctly, given there are no samples
-   * to read and the last format to be written to the sample queue is {@code endFormat}.
+   * Asserts {@link SampleQueue#read} is behaving correctly, given there are no samples to read and
+   * the last format to be written to the sample queue is {@code endFormat}.
    *
    * @param endFormat The last format to be written to the sample queue, or null of no format has
    *     been written.
@@ -573,7 +573,7 @@ public class SampleQueueTest extends TestCase {
   }
 
   /**
-   * Asserts {@link SampleQueue#readData} returns {@link C#RESULT_NOTHING_READ}.
+   * Asserts {@link SampleQueue#read} returns {@link C#RESULT_NOTHING_READ}.
    *
    * @param formatRequired The value of {@code formatRequired} passed to readData.
    */
@@ -589,7 +589,7 @@ public class SampleQueueTest extends TestCase {
   }
 
   /**
-   * Asserts {@link SampleQueue#readData} returns {@link C#RESULT_BUFFER_READ} and that the
+   * Asserts {@link SampleQueue#read} returns {@link C#RESULT_BUFFER_READ} and that the
    * {@link DecoderInputBuffer#isEndOfStream()} is set.
    *
    * @param formatRequired The value of {@code formatRequired} passed to readData.
@@ -608,8 +608,8 @@ public class SampleQueueTest extends TestCase {
   }
 
   /**
-   * Asserts {@link SampleQueue#readData} returns {@link C#RESULT_FORMAT_READ} and that the
-   * format holder is filled with a {@link Format} that equals {@code format}.
+   * Asserts {@link SampleQueue#read} returns {@link C#RESULT_FORMAT_READ} and that the format
+   * holder is filled with a {@link Format} that equals {@code format}.
    *
    * @param formatRequired The value of {@code formatRequired} passed to readData.
    * @param format The expected format.
@@ -626,8 +626,8 @@ public class SampleQueueTest extends TestCase {
   }
 
   /**
-   * Asserts {@link SampleQueue#readData} returns {@link C#RESULT_BUFFER_READ} and that the
-   * buffer is filled with the specified sample data.
+   * Asserts {@link SampleQueue#read} returns {@link C#RESULT_BUFFER_READ} and that the buffer is
+   * filled with the specified sample data.
    *
    * @param timeUs The expected buffer timestamp.
    * @param isKeyframe The expected keyframe flag.

@@ -23,11 +23,13 @@ import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.PlaybackParameters;
+import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.source.MediaSource.Listener;
 import com.google.android.exoplayer2.testutil.FakeMediaSource;
+import com.google.android.exoplayer2.testutil.FakeTimeline;
+import com.google.android.exoplayer2.testutil.FakeTimeline.TimelineWindowDefinition;
 import com.google.android.exoplayer2.testutil.TimelineAsserts;
-import com.google.android.exoplayer2.testutil.TimelineAsserts.FakeTimeline;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.upstream.Allocator;
 import java.io.IOException;
@@ -84,6 +86,24 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     TimelineAsserts.assertPeriodCounts(timeline, 2, 4, 1, 5, 6, 7, 3);
     TimelineAsserts.assertWindowIds(timeline, 222, 444, 111, 555, 666, 777, 333);
 
+    // Move sources.
+    mediaSource.moveMediaSource(2, 3);
+    waitForTimelineUpdate();
+    TimelineAsserts.assertPeriodCounts(timeline, 2, 4, 5, 1, 6, 7, 3);
+    TimelineAsserts.assertWindowIds(timeline, 222, 444, 555, 111, 666, 777, 333);
+    mediaSource.moveMediaSource(3, 2);
+    waitForTimelineUpdate();
+    TimelineAsserts.assertPeriodCounts(timeline, 2, 4, 1, 5, 6, 7, 3);
+    TimelineAsserts.assertWindowIds(timeline, 222, 444, 111, 555, 666, 777, 333);
+    mediaSource.moveMediaSource(0, 6);
+    waitForTimelineUpdate();
+    TimelineAsserts.assertPeriodCounts(timeline, 4, 1, 5, 6, 7, 3, 2);
+    TimelineAsserts.assertWindowIds(timeline, 444, 111, 555, 666, 777, 333, 222);
+    mediaSource.moveMediaSource(6, 0);
+    waitForTimelineUpdate();
+    TimelineAsserts.assertPeriodCounts(timeline, 2, 4, 1, 5, 6, 7, 3);
+    TimelineAsserts.assertWindowIds(timeline, 222, 444, 111, 555, 666, 777, 333);
+
     // Remove in the middle.
     mediaSource.removeMediaSource(3);
     waitForTimelineUpdate();
@@ -100,14 +120,13 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     }
 
     // Assert correct next and previous indices behavior after some insertions and removals.
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
-        1, 2, C.INDEX_UNSET);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
-        C.INDEX_UNSET, 0, 1);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_OFF, 1, 2, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertPreviousWindowIndices(
+        timeline, Player.REPEAT_MODE_OFF, C.INDEX_UNSET, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ALL, 2, 0, 1);
 
     // Remove at front of queue.
     mediaSource.removeMediaSource(0);
@@ -137,7 +156,9 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     mediaSource.addMediaSource(childSources[0]);
     mediaSource.addMediaSource(childSources[1]);
     mediaSource.addMediaSource(0, childSources[2]);
-    mediaSource.removeMediaSource(1);
+    mediaSource.moveMediaSource(0, 2);
+    mediaSource.removeMediaSource(0);
+    mediaSource.moveMediaSource(1, 0);
     mediaSource.addMediaSource(1, childSources[3]);
     assertNull(timeline);
 
@@ -175,7 +196,7 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     TimelineAsserts.assertWindowIds(timeline, 111, null);
     TimelineAsserts.assertWindowIsDynamic(timeline, false, true);
 
-    lazySources[1].triggerTimelineUpdate(new FakeTimeline(9, 999));
+    lazySources[1].triggerTimelineUpdate(createFakeTimeline(8));
     waitForTimelineUpdate();
     TimelineAsserts.assertPeriodCounts(timeline, 1, 9);
     TimelineAsserts.assertWindowIds(timeline, 111, 999);
@@ -194,7 +215,7 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     TimelineAsserts.assertWindowIds(timeline, null, 111, 222, 999);
     TimelineAsserts.assertWindowIsDynamic(timeline, true, false, false, false);
 
-    lazySources[3].triggerTimelineUpdate(new FakeTimeline(8, 888));
+    lazySources[3].triggerTimelineUpdate(createFakeTimeline(7));
     waitForTimelineUpdate();
     TimelineAsserts.assertPeriodCounts(timeline, 8, 1, 2, 9);
     TimelineAsserts.assertWindowIds(timeline, 888, 111, 222, 999);
@@ -207,7 +228,7 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
 
   public void testIllegalArguments() {
     DynamicConcatenatingMediaSource mediaSource = new DynamicConcatenatingMediaSource();
-    MediaSource validSource = new FakeMediaSource(new FakeTimeline(1, 1), null);
+    MediaSource validSource = new FakeMediaSource(createFakeTimeline(1), null);
 
     // Null sources.
     try {
@@ -235,9 +256,7 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     }
 
     mediaSources = new MediaSource[] {
-        new FakeMediaSource(new FakeTimeline(1, 1), null),
-        validSource
-    };
+        new FakeMediaSource(createFakeTimeline(2), null), validSource };
     try {
       mediaSource.addMediaSources(Arrays.asList(mediaSources));
       fail("Duplicate mediaSource not allowed.");
@@ -270,12 +289,16 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     timelineUpdated = false;
   }
 
-  private FakeMediaSource[] createMediaSources(int count) {
+  private static FakeMediaSource[] createMediaSources(int count) {
     FakeMediaSource[] sources = new FakeMediaSource[count];
     for (int i = 0; i < count; i++) {
-      sources[i] = new FakeMediaSource(new FakeTimeline(i + 1, (i + 1) * 111), null);
+      sources[i] = new FakeMediaSource(createFakeTimeline(i), null);
     }
     return sources;
+  }
+
+  private static FakeTimeline createFakeTimeline(int index) {
+    return new FakeTimeline(new TimelineWindowDefinition(index + 1, (index + 1) * 111));
   }
 
   private static class LazyMediaSource implements MediaSource {
@@ -329,12 +352,12 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
     }
 
     @Override
-    public void addListener(EventListener listener) {
+    public void addListener(Player.EventListener listener) {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    public void removeListener(EventListener listener) {
+    public void removeListener(Player.EventListener listener) {
       throw new UnsupportedOperationException();
     }
 
@@ -510,6 +533,11 @@ public final class DynamicConcatenatingMediaSourceTest extends TestCase {
 
     @Override
     public int getCurrentAdIndexInAdGroup() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long getContentPosition() {
       throw new UnsupportedOperationException();
     }
 

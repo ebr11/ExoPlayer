@@ -44,6 +44,7 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
   private static final int MSG_ADD = 0;
   private static final int MSG_ADD_MULTIPLE = 1;
   private static final int MSG_REMOVE = 2;
+  private static final int MSG_MOVE = 3;
 
   // Accessed on the app thread.
   private final List<MediaSource> mediaSourcesPublic;
@@ -81,7 +82,7 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
    * Adds a {@link MediaSource} to the playlist.
    *
    * @param index The index at which the new {@link MediaSource} will be inserted. This index must
-   *     be in the range of 0 <= index <= {@link #getSize()}.
+   *     be in the range of 0 &lt;= index &lt;= {@link #getSize()}.
    * @param mediaSource The {@link MediaSource} to be added to the list.
    */
   public synchronized void addMediaSource(int index, MediaSource mediaSource) {
@@ -107,7 +108,7 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
    * Adds multiple {@link MediaSource}s to the playlist.
    *
    * @param index The index at which the new {@link MediaSource}s will be inserted. This index must
-   *     be in the range of 0 <= index <= {@link #getSize()}.
+   *     be in the range of 0 &lt;= index &lt;= {@link #getSize()}.
    * @param mediaSources A collection of {@link MediaSource}s to be added to the list. The media
    *     sources are added in the order in which they appear in this collection.
    */
@@ -126,12 +127,32 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
   /**
    * Removes a {@link MediaSource} from the playlist.
    *
-   * @param index The index at which the media source will be removed.
+   * @param index The index at which the media source will be removed. This index must be in the
+   *     range of 0 &lt;= index &lt; {@link #getSize()}.
    */
   public synchronized void removeMediaSource(int index) {
     mediaSourcesPublic.remove(index);
     if (player != null) {
       player.sendMessages(new ExoPlayerMessage(this, MSG_REMOVE, index));
+    }
+  }
+
+  /**
+   * Moves an existing {@link MediaSource} within the playlist.
+   *
+   * @param currentIndex The current index of the media source in the playlist. This index must be
+   *     in the range of 0 &lt;= index &lt; {@link #getSize()}.
+   * @param newIndex The target index of the media source in the playlist. This index must be in the
+   *     range of 0 &lt;= index &lt; {@link #getSize()}.
+   */
+  public synchronized void moveMediaSource(int currentIndex, int newIndex) {
+    if (currentIndex == newIndex) {
+      return;
+    }
+    mediaSourcesPublic.add(newIndex, mediaSourcesPublic.remove(currentIndex));
+    if (player != null) {
+      player.sendMessages(new ExoPlayerMessage(this, MSG_MOVE,
+          Pair.create(currentIndex, newIndex)));
     }
   }
 
@@ -145,7 +166,7 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
   /**
    * Returns the {@link MediaSource} at a specified index.
    *
-   * @param index A index in the range of 0 <= index <= {@link #getSize()}.
+   * @param index A index in the range of 0 &lt;= index &lt;= {@link #getSize()}.
    * @return The {@link MediaSource} at this index.
    */
   public synchronized MediaSource getMediaSource(int index) {
@@ -165,8 +186,8 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
 
   @Override
   public void maybeThrowSourceInfoRefreshError() throws IOException {
-    for (MediaSourceHolder mediaSourceHolder : mediaSourceHolders) {
-      mediaSourceHolder.mediaSource.maybeThrowSourceInfoRefreshError();
+    for (int i = 0; i < mediaSourceHolders.size(); i++) {
+      mediaSourceHolders.get(i).mediaSource.maybeThrowSourceInfoRefreshError();
     }
   }
 
@@ -200,8 +221,8 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
 
   @Override
   public void releaseSource() {
-    for (MediaSourceHolder mediaSourceHolder : mediaSourceHolders) {
-      mediaSourceHolder.mediaSource.releaseSource();
+    for (int i = 0; i < mediaSourceHolders.size(); i++) {
+      mediaSourceHolders.get(i).mediaSource.releaseSource();
     }
   }
 
@@ -223,6 +244,11 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
       }
       case MSG_REMOVE: {
         removeMediaSourceInternal((Integer) message);
+        break;
+      }
+      case MSG_MOVE: {
+        Pair<Integer, Integer> messageData = (Pair<Integer, Integer>) message;
+        moveMediaSourceInternal(messageData.first, messageData.second);
         break;
       }
       default: {
@@ -304,6 +330,21 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
     holder.mediaSource.releaseSource();
   }
 
+  private void moveMediaSourceInternal(int currentIndex, int newIndex) {
+    int startIndex = Math.min(currentIndex, newIndex);
+    int endIndex = Math.max(currentIndex, newIndex);
+    int windowOffset = mediaSourceHolders.get(startIndex).firstWindowIndexInChild;
+    int periodOffset = mediaSourceHolders.get(startIndex).firstPeriodIndexInChild;
+    mediaSourceHolders.add(newIndex, mediaSourceHolders.remove(currentIndex));
+    for (int i = startIndex; i <= endIndex; i++) {
+      MediaSourceHolder holder = mediaSourceHolders.get(i);
+      holder.firstWindowIndexInChild = windowOffset;
+      holder.firstPeriodIndexInChild = periodOffset;
+      windowOffset += holder.timeline.getWindowCount();
+      periodOffset += holder.timeline.getPeriodCount();
+    }
+  }
+
   private void correctOffsets(int startIndex, int windowOffsetUpdate, int periodOffsetUpdate) {
     windowCount += windowOffsetUpdate;
     periodCount += periodOffsetUpdate;
@@ -356,6 +397,7 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
 
     public ConcatenatedTimeline(Collection<MediaSourceHolder> mediaSourceHolders, int windowCount,
         int periodCount) {
+      super(mediaSourceHolders.size());
       this.windowCount = windowCount;
       this.periodCount = periodCount;
       int childCount = mediaSourceHolders.size();
@@ -375,28 +417,42 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
     }
 
     @Override
-    protected void getChildDataByPeriodIndex(int periodIndex, ChildDataHolder childDataHolder) {
-      int index = Util.binarySearchFloor(firstPeriodInChildIndices, periodIndex, true, false);
-      setChildData(index, childDataHolder);
+    protected int getChildIndexByPeriodIndex(int periodIndex) {
+      return Util.binarySearchFloor(firstPeriodInChildIndices, periodIndex, true, false);
     }
 
     @Override
-    protected void getChildDataByWindowIndex(int windowIndex, ChildDataHolder childDataHolder) {
-      int index = Util.binarySearchFloor(firstWindowInChildIndices, windowIndex, true, false);
-      setChildData(index, childDataHolder);
+    protected int getChildIndexByWindowIndex(int windowIndex) {
+      return Util.binarySearchFloor(firstWindowInChildIndices, windowIndex, true, false);
     }
 
     @Override
-    protected boolean getChildDataByChildUid(Object childUid, ChildDataHolder childDataHolder) {
+    protected int getChildIndexByChildUid(Object childUid) {
       if (!(childUid instanceof Integer)) {
-        return false;
+        return C.INDEX_UNSET;
       }
       int index = childIndexByUid.get((int) childUid, -1);
-      if (index == -1) {
-        return false;
-      }
-      setChildData(index, childDataHolder);
-      return true;
+      return index == -1 ? C.INDEX_UNSET : index;
+    }
+
+    @Override
+    protected Timeline getTimelineByChildIndex(int childIndex) {
+      return timelines[childIndex];
+    }
+
+    @Override
+    protected int getFirstPeriodIndexByChildIndex(int childIndex) {
+      return firstPeriodInChildIndices[childIndex];
+    }
+
+    @Override
+    protected int getFirstWindowIndexByChildIndex(int childIndex) {
+      return firstWindowInChildIndices[childIndex];
+    }
+
+    @Override
+    protected Object getChildUidByChildIndex(int childIndex) {
+      return uids[childIndex];
     }
 
     @Override
@@ -409,10 +465,6 @@ public final class DynamicConcatenatingMediaSource implements MediaSource, ExoPl
       return periodCount;
     }
 
-    private void setChildData(int srcIndex, ChildDataHolder dest) {
-      dest.setData(timelines[srcIndex], firstPeriodInChildIndices[srcIndex],
-          firstWindowInChildIndices[srcIndex], uids[srcIndex]);
-    }
   }
 
   private static final class DeferredTimeline extends Timeline {

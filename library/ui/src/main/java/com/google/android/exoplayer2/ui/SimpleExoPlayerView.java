@@ -35,8 +35,8 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlaybackException;
-import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.PlaybackParameters;
+import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.metadata.Metadata;
@@ -49,6 +49,7 @@ import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout.ResizeMode;
 import com.google.android.exoplayer2.ui.PlaybackControlView.ControlDispatcher;
 import com.google.android.exoplayer2.util.Assertions;
+import com.google.android.exoplayer2.util.RepeatModeUtil;
 import com.google.android.exoplayer2.util.Util;
 import java.util.List;
 
@@ -125,7 +126,8 @@ import java.util.List;
  *         <li>Default: {@code R.id.exo_playback_control_view}</li>
  *       </ul>
  *   <li>All attributes that can be set on a {@link PlaybackControlView} can also be set on a
- *       SimpleExoPlayerView, and will be propagated to the inflated {@link PlaybackControlView}.
+ *       SimpleExoPlayerView, and will be propagated to the inflated {@link PlaybackControlView}
+ *       unless the layout is overridden to specify a custom {@code exo_controller} (see below).
  *   </li>
  * </ul>
  *
@@ -162,9 +164,17 @@ import java.util.List;
  *       </ul>
  *   </li>
  *   <li><b>{@code exo_controller_placeholder}</b> - A placeholder that's replaced with the inflated
- *       {@link PlaybackControlView}.
+ *       {@link PlaybackControlView}. Ignored if an {@code exo_controller} view exists.
  *       <ul>
  *        <li>Type: {@link View}</li>
+ *       </ul>
+ *   </li>
+ *   <li><b>{@code exo_controller}</b> - An already inflated {@link PlaybackControlView}. Allows use
+ *       of a custom extension of {@link PlaybackControlView}. Note that attributes such as
+ *       {@code rewind_increment} will not be automatically propagated through to this instance. If
+ *       a view exists with this id, any {@code exo_controller_placeholder} view will be ignored.
+ *       <ul>
+ *        <li>Type: {@link PlaybackControlView}</li>
  *       </ul>
  *   </li>
  *   <li><b>{@code exo_overlay}</b> - A {@link FrameLayout} positioned on top of the player which
@@ -314,8 +324,11 @@ public final class SimpleExoPlayerView extends FrameLayout {
     }
 
     // Playback control view.
+    PlaybackControlView customController = (PlaybackControlView) findViewById(R.id.exo_controller);
     View controllerPlaceholder = findViewById(R.id.exo_controller_placeholder);
-    if (controllerPlaceholder != null) {
+    if (customController != null) {
+      this.controller = customController;
+    } else if (controllerPlaceholder != null) {
       // Note: rewindMs and fastForwardMs are passed via attrs, so we don't need to make explicit
       // calls to set them.
       this.controller = new PlaybackControlView(context, attrs);
@@ -615,7 +628,8 @@ public final class SimpleExoPlayerView extends FrameLayout {
   /**
    * Sets the rewind increment in milliseconds.
    *
-   * @param rewindMs The rewind increment in milliseconds.
+   * @param rewindMs The rewind increment in milliseconds. A non-positive value will cause the
+   *     rewind button to be disabled.
    */
   public void setRewindIncrementMs(int rewindMs) {
     Assertions.checkState(controller != null);
@@ -625,7 +639,8 @@ public final class SimpleExoPlayerView extends FrameLayout {
   /**
    * Sets the fast forward increment in milliseconds.
    *
-   * @param fastForwardMs The fast forward increment in milliseconds.
+   * @param fastForwardMs The fast forward increment in milliseconds. A non-positive value will
+   *     cause the fast forward button to be disabled.
    */
   public void setFastForwardIncrementMs(int fastForwardMs) {
     Assertions.checkState(controller != null);
@@ -635,9 +650,9 @@ public final class SimpleExoPlayerView extends FrameLayout {
   /**
    * Sets which repeat toggle modes are enabled.
    *
-   * @param repeatToggleModes A set of {@link PlaybackControlView.RepeatToggleModes}.
+   * @param repeatToggleModes A set of {@link RepeatModeUtil.RepeatToggleModes}.
    */
-  public void setRepeatToggleModes(@PlaybackControlView.RepeatToggleModes int repeatToggleModes) {
+  public void setRepeatToggleModes(@RepeatModeUtil.RepeatToggleModes int repeatToggleModes) {
     Assertions.checkState(controller != null);
     controller.setRepeatToggleModes(repeatToggleModes);
   }
@@ -723,8 +738,8 @@ public final class SimpleExoPlayerView extends FrameLayout {
       return true;
     }
     int playbackState = player.getPlaybackState();
-    return controllerAutoShow && (playbackState == ExoPlayer.STATE_IDLE
-        || playbackState == ExoPlayer.STATE_ENDED || !player.getPlayWhenReady());
+    return controllerAutoShow && (playbackState == Player.STATE_IDLE
+        || playbackState == Player.STATE_ENDED || !player.getPlayWhenReady());
   }
 
   private void showController(boolean showIndefinitely) {
@@ -827,7 +842,7 @@ public final class SimpleExoPlayerView extends FrameLayout {
   }
 
   private final class ComponentListener implements SimpleExoPlayer.VideoListener,
-      TextRenderer.Output, ExoPlayer.EventListener {
+      TextRenderer.Output, Player.EventListener {
 
     // TextRenderer.Output implementation
 
@@ -861,7 +876,7 @@ public final class SimpleExoPlayerView extends FrameLayout {
       updateForCurrentTrackSelections();
     }
 
-    // ExoPlayer.EventListener implementation
+    // Player.EventListener implementation
 
     @Override
     public void onLoadingChanged(boolean isLoading) {

@@ -16,11 +16,13 @@
 package com.google.android.exoplayer2.source;
 
 import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.ExoPlayer;
+import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.testutil.FakeMediaSource;
+import com.google.android.exoplayer2.testutil.FakeTimeline;
+import com.google.android.exoplayer2.testutil.FakeTimeline.TimelineWindowDefinition;
+import com.google.android.exoplayer2.testutil.TestUtil;
 import com.google.android.exoplayer2.testutil.TimelineAsserts;
-import com.google.android.exoplayer2.testutil.TimelineAsserts.FakeTimeline;
 import junit.framework.TestCase;
 
 /**
@@ -31,42 +33,39 @@ public class LoopingMediaSourceTest extends TestCase {
   private final Timeline multiWindowTimeline;
 
   public LoopingMediaSourceTest() {
-    multiWindowTimeline = TimelineAsserts.extractTimelineFromMediaSource(
-        new ConcatenatingMediaSource(
-            new FakeMediaSource(new FakeTimeline(1, 111), null),
-            new FakeMediaSource(new FakeTimeline(1, 222), null),
-            new FakeMediaSource(new FakeTimeline(1, 333), null)));
+    multiWindowTimeline = TestUtil.extractTimelineFromMediaSource(new FakeMediaSource(
+        new FakeTimeline(new TimelineWindowDefinition(1, 111),
+            new TimelineWindowDefinition(1, 222), new TimelineWindowDefinition(1, 333)), null));
   }
 
   public void testSingleLoop() {
     Timeline timeline = getLoopingTimeline(multiWindowTimeline, 1);
     TimelineAsserts.assertWindowIds(timeline, 111, 222, 333);
     TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
-        C.INDEX_UNSET, 0, 1);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
-        1, 2, C.INDEX_UNSET);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertPreviousWindowIndices(
+        timeline, Player.REPEAT_MODE_OFF, C.INDEX_UNSET, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_OFF, 1, 2, C.INDEX_UNSET);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ALL, 1, 2, 0);
   }
 
   public void testMultiLoop() {
     Timeline timeline = getLoopingTimeline(multiWindowTimeline, 3);
     TimelineAsserts.assertWindowIds(timeline, 111, 222, 333, 111, 222, 333, 111, 222, 333);
     TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_OFF,
         C.INDEX_UNSET, 0, 1, 2, 3, 4, 5, 6, 7, 8);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE,
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ONE,
         0, 1, 2, 3, 4, 5, 6, 7, 8);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL,
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ALL,
         8, 0, 1, 2, 3, 4, 5, 6, 7);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF,
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_OFF,
         1, 2, 3, 4, 5, 6, 7, 8, C.INDEX_UNSET);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE,
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ONE,
         0, 1, 2, 3, 4, 5, 6, 7, 8);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL,
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ALL,
         1, 2, 3, 4, 5, 6, 7, 8, 0);
   }
 
@@ -74,12 +73,12 @@ public class LoopingMediaSourceTest extends TestCase {
     Timeline timeline = getLoopingTimeline(multiWindowTimeline, Integer.MAX_VALUE);
     TimelineAsserts.assertWindowIds(timeline, 111, 222, 333);
     TimelineAsserts.assertPeriodCounts(timeline, 1, 1, 1);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, 2, 0, 1);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
-    TimelineAsserts.assertPreviousWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 2, 0, 1);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_OFF, 1, 2, 0);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ONE, 0, 1, 2);
-    TimelineAsserts.assertNextWindowIndices(timeline, ExoPlayer.REPEAT_MODE_ALL, 1, 2, 0);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_OFF, 2, 0, 1);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertPreviousWindowIndices(timeline, Player.REPEAT_MODE_ALL, 2, 0, 1);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_OFF, 1, 2, 0);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ONE, 0, 1, 2);
+    TimelineAsserts.assertNextWindowIndices(timeline, Player.REPEAT_MODE_ALL, 1, 2, 0);
   }
 
   /**
@@ -88,7 +87,7 @@ public class LoopingMediaSourceTest extends TestCase {
    */
   private static Timeline getLoopingTimeline(Timeline timeline, int loopCount) {
     MediaSource mediaSource = new FakeMediaSource(timeline, null);
-    return TimelineAsserts.extractTimelineFromMediaSource(
+    return TestUtil.extractTimelineFromMediaSource(
         new LoopingMediaSource(mediaSource, loopCount));
   }
 
