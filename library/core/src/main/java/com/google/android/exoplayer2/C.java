@@ -124,7 +124,7 @@ public final class C {
   @Retention(RetentionPolicy.SOURCE)
   @IntDef({Format.NO_VALUE, ENCODING_INVALID, ENCODING_PCM_8BIT, ENCODING_PCM_16BIT,
       ENCODING_PCM_24BIT, ENCODING_PCM_32BIT, ENCODING_AC3, ENCODING_E_AC3, ENCODING_DTS,
-      ENCODING_DTS_HD})
+      ENCODING_DTS_HD, ENCODING_TRUE_HD})
   public @interface Encoding {}
 
   /**
@@ -170,6 +170,12 @@ public final class C {
    * @see AudioFormat#ENCODING_DTS_HD
    */
   public static final int ENCODING_DTS_HD = AudioFormat.ENCODING_DTS_HD;
+
+  /**
+   *
+   */
+   @SuppressWarnings("InlinedApi")
+   public static final int ENCODING_TRUE_HD = 14;
 
   /**
    * @see AudioFormat#CHANNEL_OUT_7POINT1_SURROUND
