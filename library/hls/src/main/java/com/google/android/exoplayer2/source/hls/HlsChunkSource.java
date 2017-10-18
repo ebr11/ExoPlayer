@@ -39,7 +39,6 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Source of Hls (possibly adaptive) chunks.
@@ -93,6 +92,7 @@ import java.util.Locale;
   private byte[] scratchSpace;
   private IOException fatalError;
   private HlsUrl expectedPlaylistUrl;
+  private boolean independentSegments;
 
   private Uri encryptionKeyUri;
   private byte[] encryptionKey;
@@ -166,6 +166,13 @@ import java.util.Locale;
   }
 
   /**
+   * Returns the current track selection.
+   */
+  public TrackSelection getTrackSelection() {
+    return trackSelection;
+  }
+
+  /**
    * Resets the source.
    */
   public void reset() {
@@ -200,10 +207,11 @@ import java.util.Locale;
     int oldVariantIndex = previous == null ? C.INDEX_UNSET
         : trackGroup.indexOf(previous.trackFormat);
     expectedPlaylistUrl = null;
-    // Use start time of the previous chunk rather than its end time because switching format will
-    // require downloading overlapping segments.
-    long bufferedDurationUs = previous == null ? 0
-        : Math.max(0, previous.startTimeUs - playbackPositionUs);
+    // Unless segments are known to be independent, switching variant will require downloading
+    // overlapping segments. Hence we use the start time of the previous chunk rather than its end
+    // time for this case.
+    long bufferedDurationUs = previous == null ? 0 : Math.max(0,
+        (independentSegments ? previous.endTimeUs : previous.startTimeUs) - playbackPositionUs);
 
     // Select the variant.
     trackSelection.updateSelectedTrack(bufferedDurationUs);
@@ -218,12 +226,14 @@ import java.util.Locale;
       return;
     }
     HlsMediaPlaylist mediaPlaylist = playlistTracker.getPlaylistSnapshot(selectedUrl);
+    independentSegments = mediaPlaylist.hasIndependentSegmentsTag;
 
     // Select the chunk.
     int chunkMediaSequence;
     if (previous == null || switchingVariant) {
-      long targetPositionUs = previous == null ? playbackPositionUs : previous.startTimeUs;
-      if (!mediaPlaylist.hasEndTag && targetPositionUs > mediaPlaylist.getEndTimeUs()) {
+      long targetPositionUs = previous == null ? playbackPositionUs
+          : independentSegments ? previous.endTimeUs : previous.startTimeUs;
+      if (!mediaPlaylist.hasEndTag && targetPositionUs >= mediaPlaylist.getEndTimeUs()) {
         // If the playlist is too old to contain the chunk, we need to refresh it.
         chunkMediaSequence = mediaPlaylist.mediaSequence + mediaPlaylist.segments.size();
       } else {
@@ -358,7 +368,7 @@ import java.util.Locale;
 
   private void setEncryptionData(Uri keyUri, String iv, byte[] secretKey) {
     String trimmedIv;
-    if (iv.toLowerCase(Locale.getDefault()).startsWith("0x")) {
+    if (Util.toLowerInvariant(iv).startsWith("0x")) {
       trimmedIv = iv.substring(2);
     } else {
       trimmedIv = iv;
