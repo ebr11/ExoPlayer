@@ -17,6 +17,7 @@ package com.google.android.exoplayer2.upstream;
 
 import android.content.Context;
 import android.net.Uri;
+import android.util.Log;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.Util;
 import java.io.IOException;
@@ -25,26 +26,44 @@ import java.io.IOException;
  * A {@link DataSource} that supports multiple URI schemes. The supported schemes are:
  *
  * <ul>
- * <li>file: For fetching data from a local file (e.g. file:///path/to/media/media.mp4, or just
- *     /path/to/media/media.mp4 because the implementation assumes that a URI without a scheme is a
- *     local file URI).
- * <li>asset: For fetching data from an asset in the application's apk (e.g. asset:///media.mp4).
- * <li>content: For fetching data from a content URI (e.g. content://authority/path/123).
- * <li>http(s): For fetching data over HTTP and HTTPS (e.g. https://www.something.com/media.mp4), if
- *     constructed using {@link #DefaultDataSource(Context, TransferListener, String, boolean)}, or
- *     any other schemes supported by a base data source if constructed using
- *     {@link #DefaultDataSource(Context, TransferListener, DataSource)}.
+ *   <li>file: For fetching data from a local file (e.g. file:///path/to/media/media.mp4, or just
+ *       /path/to/media/media.mp4 because the implementation assumes that a URI without a scheme is
+ *       a local file URI).
+ *   <li>asset: For fetching data from an asset in the application's apk (e.g. asset:///media.mp4).
+ *   <li>rawresource: For fetching data from a raw resource in the application's apk (e.g.
+ *       rawresource:///resourceId, where rawResourceId is the integer identifier of the raw
+ *       resource).
+ *   <li>content: For fetching data from a content URI (e.g. content://authority/path/123).
+ *   <li>rtmp: For fetching data over RTMP. Only supported if the project using ExoPlayer has an
+ *       explicit dependency on ExoPlayer's RTMP extension.
+ *   <li>data: For parsing data inlined in the URI as defined in RFC 2397.
+ *   <li>http(s): For fetching data over HTTP and HTTPS (e.g. https://www.something.com/media.mp4),
+ *       if constructed using {@link #DefaultDataSource(Context, TransferListener, String,
+ *       boolean)}, or any other schemes supported by a base data source if constructed using {@link
+ *       #DefaultDataSource(Context, TransferListener, DataSource)}.
  * </ul>
  */
 public final class DefaultDataSource implements DataSource {
 
+  private static final String TAG = "DefaultDataSource";
+
   private static final String SCHEME_ASSET = "asset";
   private static final String SCHEME_CONTENT = "content";
+  private static final String SCHEME_RTMP = "rtmp";
+  private static final String SCHEME_RAW = RawResourceDataSource.RAW_RESOURCE_SCHEME;
+
+  private final Context context;
+  private final TransferListener<? super DataSource> listener;
 
   private final DataSource baseDataSource;
-  private final DataSource fileDataSource;
-  private final DataSource assetDataSource;
-  private final DataSource contentDataSource;
+
+  // Lazily initialized.
+  private DataSource fileDataSource;
+  private DataSource assetDataSource;
+  private DataSource contentDataSource;
+  private DataSource rtmpDataSource;
+  private DataSource dataSchemeDataSource;
+  private DataSource rawResourceDataSource;
 
   private DataSource dataSource;
 
@@ -95,10 +114,9 @@ public final class DefaultDataSource implements DataSource {
    */
   public DefaultDataSource(Context context, TransferListener<? super DataSource> listener,
       DataSource baseDataSource) {
+    this.context = context.getApplicationContext();
+    this.listener = listener;
     this.baseDataSource = Assertions.checkNotNull(baseDataSource);
-    this.fileDataSource = new FileDataSource(listener);
-    this.assetDataSource = new AssetDataSource(context, listener);
-    this.contentDataSource = new ContentDataSource(context, listener);
   }
 
   @Override
@@ -108,14 +126,20 @@ public final class DefaultDataSource implements DataSource {
     String scheme = dataSpec.uri.getScheme();
     if (Util.isLocalFileUri(dataSpec.uri)) {
       if (dataSpec.uri.getPath().startsWith("/android_asset/")) {
-        dataSource = assetDataSource;
+        dataSource = getAssetDataSource();
       } else {
-        dataSource = fileDataSource;
+        dataSource = getFileDataSource();
       }
     } else if (SCHEME_ASSET.equals(scheme)) {
-      dataSource = assetDataSource;
+      dataSource = getAssetDataSource();
     } else if (SCHEME_CONTENT.equals(scheme)) {
-      dataSource = contentDataSource;
+      dataSource = getContentDataSource();
+    } else if (SCHEME_RTMP.equals(scheme)) {
+      dataSource = getRtmpDataSource();
+    } else if (DataSchemeDataSource.SCHEME_DATA.equals(scheme)) {
+      dataSource = getDataSchemeDataSource();
+    } else if (SCHEME_RAW.equals(scheme)) {
+      dataSource = getRawResourceDataSource();
     } else {
       dataSource = baseDataSource;
     }
@@ -144,4 +168,59 @@ public final class DefaultDataSource implements DataSource {
     }
   }
 
+  private DataSource getFileDataSource() {
+    if (fileDataSource == null) {
+      fileDataSource = new FileDataSource(listener);
+    }
+    return fileDataSource;
+  }
+
+  private DataSource getAssetDataSource() {
+    if (assetDataSource == null) {
+      assetDataSource = new AssetDataSource(context, listener);
+    }
+    return assetDataSource;
+  }
+
+  private DataSource getContentDataSource() {
+    if (contentDataSource == null) {
+      contentDataSource = new ContentDataSource(context, listener);
+    }
+    return contentDataSource;
+  }
+
+  private DataSource getRtmpDataSource() {
+    if (rtmpDataSource == null) {
+      try {
+        // LINT.IfChange
+        Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.rtmp.RtmpDataSource");
+        rtmpDataSource = (DataSource) clazz.getConstructor().newInstance();
+        // LINT.ThenChange(../../../../../../../../proguard-rules.txt)
+      } catch (ClassNotFoundException e) {
+        // Expected if the app was built without the RTMP extension.
+        Log.w(TAG, "Attempting to play RTMP stream without depending on the RTMP extension");
+      } catch (Exception e) {
+        // The RTMP extension is present, but instantiation failed.
+        throw new RuntimeException("Error instantiating RTMP extension", e);
+      }
+      if (rtmpDataSource == null) {
+        rtmpDataSource = baseDataSource;
+      }
+    }
+    return rtmpDataSource;
+  }
+
+  private DataSource getDataSchemeDataSource() {
+    if (dataSchemeDataSource == null) {
+      dataSchemeDataSource = new DataSchemeDataSource();
+    }
+    return dataSchemeDataSource;
+  }
+
+  private DataSource getRawResourceDataSource() {
+    if (rawResourceDataSource == null) {
+      rawResourceDataSource = new RawResourceDataSource(context, listener);
+    }
+    return rawResourceDataSource;
+  }
 }

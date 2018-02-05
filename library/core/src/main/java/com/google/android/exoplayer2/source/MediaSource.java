@@ -23,7 +23,20 @@ import com.google.android.exoplayer2.upstream.Allocator;
 import java.io.IOException;
 
 /**
- * A source of media consisting of one or more {@link MediaPeriod}s.
+ * Defines and provides media to be played by an {@link ExoPlayer}. A MediaSource has two main
+ * responsibilities:
+ * <ul>
+ *   <li>To provide the player with a {@link Timeline} defining the structure of its media, and to
+ *   provide a new timeline whenever the structure of the media changes. The MediaSource provides
+ *   these timelines by calling {@link Listener#onSourceInfoRefreshed} on the {@link Listener}
+ *   passed to {@link #prepareSource(ExoPlayer, boolean, Listener)}.</li>
+ *   <li>To provide {@link MediaPeriod} instances for the periods in its timeline. MediaPeriods are
+ *   obtained by calling {@link #createPeriod(MediaPeriodId, Allocator)}, and provide a way for the
+ *   player to load and read the media.</li>
+ * </ul>
+ * All methods are called on the player's internal playback thread, as described in the
+ * {@link ExoPlayer} Javadoc. They should not be called directly from application code. Instances
+ * should not be re-used, meaning they should be passed to {@link ExoPlayer#prepare} at most once.
  */
 public interface MediaSource {
 
@@ -34,11 +47,14 @@ public interface MediaSource {
 
     /**
      * Called when manifest and/or timeline has been refreshed.
+     * <p>
+     * Called on the playback thread.
      *
+     * @param source The {@link MediaSource} whose info has been refreshed.
      * @param timeline The source's timeline.
      * @param manifest The loaded manifest. May be null.
      */
-    void onSourceInfoRefreshed(Timeline timeline, @Nullable Object manifest);
+    void onSourceInfoRefreshed(MediaSource source, Timeline timeline, @Nullable Object manifest);
 
   }
 
@@ -133,8 +149,12 @@ public interface MediaSource {
 
   }
 
+  String MEDIA_SOURCE_REUSED_ERROR_MESSAGE = "MediaSource instances are not allowed to be reused.";
+
   /**
    * Starts preparation of the source.
+   * <p>
+   * Should not be called directly from application code.
    *
    * @param player The player for which this source is being prepared.
    * @param isTopLevelSource Whether this source has been passed directly to
@@ -147,6 +167,8 @@ public interface MediaSource {
 
   /**
    * Throws any pending error encountered while loading or refreshing source information.
+   * <p>
+   * Should not be called directly from application code.
    */
   void maybeThrowSourceInfoRefreshError() throws IOException;
 
@@ -154,6 +176,8 @@ public interface MediaSource {
    * Returns a new {@link MediaPeriod} identified by {@code periodId}. This method may be called
    * multiple times with the same period identifier without an intervening call to
    * {@link #releasePeriod(MediaPeriod)}.
+   * <p>
+   * Should not be called directly from application code.
    *
    * @param id The identifier of the period.
    * @param allocator An {@link Allocator} from which to obtain media buffer allocations.
@@ -163,6 +187,8 @@ public interface MediaSource {
 
   /**
    * Releases the period.
+   * <p>
+   * Should not be called directly from application code.
    *
    * @param mediaPeriod The period to release.
    */
@@ -171,8 +197,7 @@ public interface MediaSource {
   /**
    * Releases the source.
    * <p>
-   * This method should be called when the source is no longer required. It may be called in any
-   * state.
+   * Should not be called directly from application code.
    */
   void releaseSource();
 

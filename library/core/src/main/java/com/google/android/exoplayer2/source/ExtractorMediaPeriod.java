@@ -17,9 +17,11 @@ package com.google.android.exoplayer2.source;
 
 import android.net.Uri;
 import android.os.Handler;
+import android.support.annotation.Nullable;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.FormatHolder;
+import com.google.android.exoplayer2.SeekParameters;
 import com.google.android.exoplayer2.decoder.DecoderInputBuffer;
 import com.google.android.exoplayer2.extractor.DefaultExtractorInput;
 import com.google.android.exoplayer2.extractor.Extractor;
@@ -27,7 +29,9 @@ import com.google.android.exoplayer2.extractor.ExtractorInput;
 import com.google.android.exoplayer2.extractor.ExtractorOutput;
 import com.google.android.exoplayer2.extractor.PositionHolder;
 import com.google.android.exoplayer2.extractor.SeekMap;
+import com.google.android.exoplayer2.extractor.SeekMap.SeekPoints;
 import com.google.android.exoplayer2.extractor.TrackOutput;
+import com.google.android.exoplayer2.source.MediaSourceEventListener.EventDispatcher;
 import com.google.android.exoplayer2.source.SampleQueue.UpstreamFormatChangedListener;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.upstream.Allocator;
@@ -51,6 +55,21 @@ import java.util.Arrays;
     UpstreamFormatChangedListener {
 
   /**
+   * Listener for information about the period.
+   */
+  interface Listener {
+
+    /**
+     * Called when the duration or ability to seek within the period changes.
+     *
+     * @param durationUs The duration of the period, or {@link C#TIME_UNSET}.
+     * @param isSeekable Whether the period is seekable.
+     */
+    void onSourceInfoRefreshed(long durationUs, boolean isSeekable);
+
+  }
+
+  /**
    * When the source's duration is unknown, it is calculated by adding this value to the largest
    * sample timestamp seen when buffering completes.
    */
@@ -59,11 +78,10 @@ import java.util.Arrays;
   private final Uri uri;
   private final DataSource dataSource;
   private final int minLoadableRetryCount;
-  private final Handler eventHandler;
-  private final ExtractorMediaSource.EventListener eventListener;
-  private final MediaSource.Listener sourceListener;
+  private final EventDispatcher eventDispatcher;
+  private final Listener listener;
   private final Allocator allocator;
-  private final String customCacheKey;
+  @Nullable private final String customCacheKey;
   private final long continueLoadingCheckIntervalBytes;
   private final Loader loader;
   private final ExtractorHolder extractorHolder;
@@ -78,19 +96,22 @@ import java.util.Arrays;
   private int[] sampleQueueTrackIds;
   private boolean sampleQueuesBuilt;
   private boolean prepared;
+  private int actualMinLoadableRetryCount;
 
   private boolean seenFirstTrackSelection;
-  private boolean notifyReset;
+  private boolean notifyDiscontinuity;
   private int enabledTrackCount;
   private TrackGroupArray tracks;
   private long durationUs;
   private boolean[] trackEnabledStates;
   private boolean[] trackIsAudioVideoFlags;
+  private boolean[] trackFormatNotificationSent;
   private boolean haveAudioVideoTracks;
   private long length;
 
   private long lastSeekPositionUs;
   private long pendingResetPositionUs;
+  private boolean pendingDeferredRetry;
 
   private int extractedSamplesCountAtStartOfLoad;
   private boolean loadingFinished;
@@ -101,25 +122,29 @@ import java.util.Arrays;
    * @param dataSource The data source to read the media.
    * @param extractors The extractors to use to read the data source.
    * @param minLoadableRetryCount The minimum number of times to retry if a loading error occurs.
-   * @param eventHandler A handler for events. May be null if delivery of events is not required.
-   * @param eventListener A listener of events. May be null if delivery of events is not required.
-   * @param sourceListener A listener to notify when the timeline has been loaded.
+   * @param eventDispatcher A dispatcher to notify of events.
+   * @param listener A listener to notify when information about the period changes.
    * @param allocator An {@link Allocator} from which to obtain media buffer allocations.
    * @param customCacheKey A custom key that uniquely identifies the original stream. Used for cache
    *     indexing. May be null.
    * @param continueLoadingCheckIntervalBytes The number of bytes that should be loaded between each
    *     invocation of {@link Callback#onContinueLoadingRequested(SequenceableLoader)}.
    */
-  public ExtractorMediaPeriod(Uri uri, DataSource dataSource, Extractor[] extractors,
-      int minLoadableRetryCount, Handler eventHandler,
-      ExtractorMediaSource.EventListener eventListener, MediaSource.Listener sourceListener,
-      Allocator allocator, String customCacheKey, int continueLoadingCheckIntervalBytes) {
+  public ExtractorMediaPeriod(
+      Uri uri,
+      DataSource dataSource,
+      Extractor[] extractors,
+      int minLoadableRetryCount,
+      EventDispatcher eventDispatcher,
+      Listener listener,
+      Allocator allocator,
+      @Nullable String customCacheKey,
+      int continueLoadingCheckIntervalBytes) {
     this.uri = uri;
     this.dataSource = dataSource;
     this.minLoadableRetryCount = minLoadableRetryCount;
-    this.eventHandler = eventHandler;
-    this.eventListener = eventListener;
-    this.sourceListener = sourceListener;
+    this.eventDispatcher = eventDispatcher;
+    this.listener = listener;
     this.allocator = allocator;
     this.customCacheKey = customCacheKey;
     this.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes;
@@ -145,13 +170,19 @@ import java.util.Arrays;
     sampleQueues = new SampleQueue[0];
     pendingResetPositionUs = C.TIME_UNSET;
     length = C.LENGTH_UNSET;
+    durationUs = C.TIME_UNSET;
+    // Assume on-demand for MIN_RETRY_COUNT_DEFAULT_FOR_MEDIA, until prepared.
+    actualMinLoadableRetryCount =
+        minLoadableRetryCount == ExtractorMediaSource.MIN_RETRY_COUNT_DEFAULT_FOR_MEDIA
+        ? ExtractorMediaSource.DEFAULT_MIN_LOADABLE_RETRY_COUNT_ON_DEMAND
+        : minLoadableRetryCount;
   }
 
   public void release() {
     boolean releasedSynchronously = loader.release(this);
     if (prepared && !releasedSynchronously) {
-      // Discard as much as we can synchronously. We only do this if we're prepared, since
-      // otherwise sampleQueues may still be being modified by the loading thread.
+      // Discard as much as we can synchronously. We only do this if we're prepared, since otherwise
+      // sampleQueues may still be being modified by the loading thread.
       for (SampleQueue sampleQueue : sampleQueues) {
         sampleQueue.discardToEnd();
       }
@@ -164,7 +195,7 @@ import java.util.Arrays;
   public void onLoaderReleased() {
     extractorHolder.release();
     for (SampleQueue sampleQueue : sampleQueues) {
-      sampleQueue.reset(true);
+      sampleQueue.reset();
     }
   }
 
@@ -219,15 +250,28 @@ import java.util.Arrays;
         if (!seekRequired) {
           SampleQueue sampleQueue = sampleQueues[track];
           sampleQueue.rewind();
-          seekRequired = !sampleQueue.advanceTo(positionUs, true, true)
+          // A seek can be avoided if we're able to advance to the current playback position in the
+          // sample queue, or if we haven't read anything from the queue since the previous seek
+          // (this case is common for sparse tracks such as metadata tracks). In all other cases a
+          // seek is required.
+          seekRequired = sampleQueue.advanceTo(positionUs, true, true) == SampleQueue.ADVANCE_FAILED
               && sampleQueue.getReadIndex() != 0;
         }
       }
     }
     if (enabledTrackCount == 0) {
-      notifyReset = false;
+      pendingDeferredRetry = false;
+      notifyDiscontinuity = false;
       if (loader.isLoading()) {
+        // Discard as much as we can synchronously.
+        for (SampleQueue sampleQueue : sampleQueues) {
+          sampleQueue.discardToEnd();
+        }
         loader.cancelLoading();
+      } else {
+        for (SampleQueue sampleQueue : sampleQueues) {
+          sampleQueue.reset();
+        }
       }
     } else if (seekRequired) {
       positionUs = seekToUs(positionUs);
@@ -243,16 +287,21 @@ import java.util.Arrays;
   }
 
   @Override
-  public void discardBuffer(long positionUs) {
+  public void discardBuffer(long positionUs, boolean toKeyframe) {
     int trackCount = sampleQueues.length;
     for (int i = 0; i < trackCount; i++) {
-      sampleQueues[i].discardTo(positionUs, false, trackEnabledStates[i]);
+      sampleQueues[i].discardTo(positionUs, toKeyframe, trackEnabledStates[i]);
     }
   }
 
   @Override
+  public void reevaluateBuffer(long positionUs) {
+    // Do nothing.
+  }
+
+  @Override
   public boolean continueLoading(long playbackPositionUs) {
-    if (loadingFinished || (prepared && enabledTrackCount == 0)) {
+    if (loadingFinished || pendingDeferredRetry || (prepared && enabledTrackCount == 0)) {
       return false;
     }
     boolean continuedLoading = loadCondition.open();
@@ -270,8 +319,9 @@ import java.util.Arrays;
 
   @Override
   public long readDiscontinuity() {
-    if (notifyReset) {
-      notifyReset = false;
+    if (notifyDiscontinuity
+        && (loadingFinished || getExtractedSamplesCount() > extractedSamplesCountAtStartOfLoad)) {
+      notifyDiscontinuity = false;
       return lastSeekPositionUs;
     }
     return C.TIME_UNSET;
@@ -307,60 +357,116 @@ import java.util.Arrays;
     // Treat all seeks into non-seekable media as being to t=0.
     positionUs = seekMap.isSeekable() ? positionUs : 0;
     lastSeekPositionUs = positionUs;
-    // If we're not pending a reset, see if we can seek within the sample queues.
-    boolean seekInsideBuffer = !isPendingReset();
-    int trackCount = sampleQueues.length;
-    for (int i = 0; seekInsideBuffer && i < trackCount; i++) {
-      SampleQueue sampleQueue = sampleQueues[i];
-      sampleQueue.rewind();
-      // TODO: For sparse tracks (e.g. text, metadata) this may return false when an in-buffer
-      // seek should be allowed. If there are non-sparse tracks (e.g. video, audio) for which
-      // in-buffer seeking is successful, we should perform an in-buffer seek unconditionally.
-      seekInsideBuffer = sampleQueue.advanceTo(positionUs, true, false);
-      sampleQueue.discardToRead();
+    notifyDiscontinuity = false;
+    // If we're not pending a reset, see if we can seek within the buffer.
+    if (!isPendingReset() && seekInsideBufferUs(positionUs)) {
+      return positionUs;
     }
-    // If we failed to seek within the sample queues, we need to restart.
-    if (!seekInsideBuffer) {
-      pendingResetPositionUs = positionUs;
-      loadingFinished = false;
-      if (loader.isLoading()) {
-        loader.cancelLoading();
-      } else {
-        for (int i = 0; i < trackCount; i++) {
-          sampleQueues[i].reset(trackEnabledStates[i]);
-        }
+    // We were unable to seek within the buffer, so need to reset.
+    pendingDeferredRetry = false;
+    pendingResetPositionUs = positionUs;
+    loadingFinished = false;
+    if (loader.isLoading()) {
+      loader.cancelLoading();
+    } else {
+      for (SampleQueue sampleQueue : sampleQueues) {
+        sampleQueue.reset();
       }
     }
-    notifyReset = false;
     return positionUs;
+  }
+
+  @Override
+  public long getAdjustedSeekPositionUs(long positionUs, SeekParameters seekParameters) {
+    if (!seekMap.isSeekable()) {
+      // Treat all seeks into non-seekable media as being to t=0.
+      return 0;
+    }
+    SeekPoints seekPoints = seekMap.getSeekPoints(positionUs);
+    return Util.resolveSeekPositionUs(
+        positionUs, seekParameters, seekPoints.first.timeUs, seekPoints.second.timeUs);
   }
 
   // SampleStream methods.
 
   /* package */ boolean isReady(int track) {
-    return loadingFinished || (!isPendingReset() && sampleQueues[track].hasNextSample());
+    return !suppressRead() && (loadingFinished || sampleQueues[track].hasNextSample());
   }
 
   /* package */ void maybeThrowError() throws IOException {
-    loader.maybeThrowError();
+    loader.maybeThrowError(actualMinLoadableRetryCount);
   }
 
   /* package */ int readData(int track, FormatHolder formatHolder, DecoderInputBuffer buffer,
       boolean formatRequired) {
-    if (notifyReset || isPendingReset()) {
+    if (suppressRead()) {
       return C.RESULT_NOTHING_READ;
     }
-    return sampleQueues[track].read(formatHolder, buffer, formatRequired, loadingFinished,
-        lastSeekPositionUs);
+    int result =
+        sampleQueues[track].read(
+            formatHolder, buffer, formatRequired, loadingFinished, lastSeekPositionUs);
+    if (result == C.RESULT_BUFFER_READ) {
+      maybeNotifyTrackFormat(track);
+    } else if (result == C.RESULT_NOTHING_READ) {
+      maybeStartDeferredRetry(track);
+    }
+    return result;
   }
 
-  /* package */ void skipData(int track, long positionUs) {
-    SampleQueue sampleQueue = sampleQueues[track];
-    if (loadingFinished && positionUs > sampleQueue.getLargestQueuedTimestampUs()) {
-      sampleQueue.advanceToEnd();
-    } else {
-      sampleQueue.advanceTo(positionUs, true, true);
+  /* package */ int skipData(int track, long positionUs) {
+    if (suppressRead()) {
+      return 0;
     }
+    SampleQueue sampleQueue = sampleQueues[track];
+    int skipCount;
+    if (loadingFinished && positionUs > sampleQueue.getLargestQueuedTimestampUs()) {
+      skipCount = sampleQueue.advanceToEnd();
+    } else {
+      skipCount = sampleQueue.advanceTo(positionUs, true, true);
+      if (skipCount == SampleQueue.ADVANCE_FAILED) {
+        skipCount = 0;
+      }
+    }
+    if (skipCount > 0) {
+      maybeNotifyTrackFormat(track);
+    } else {
+      maybeStartDeferredRetry(track);
+    }
+    return skipCount;
+  }
+
+  private void maybeNotifyTrackFormat(int track) {
+    if (!trackFormatNotificationSent[track]) {
+      Format trackFormat = tracks.get(track).getFormat(0);
+      eventDispatcher.downstreamFormatChanged(
+          MimeTypes.getTrackType(trackFormat.sampleMimeType),
+          trackFormat,
+          C.SELECTION_REASON_UNKNOWN,
+          /* trackSelectionData= */ null,
+          lastSeekPositionUs);
+      trackFormatNotificationSent[track] = true;
+    }
+  }
+
+  private void maybeStartDeferredRetry(int track) {
+    if (!pendingDeferredRetry
+        || !trackIsAudioVideoFlags[track]
+        || sampleQueues[track].hasNextSample()) {
+      return;
+    }
+    pendingResetPositionUs = 0;
+    pendingDeferredRetry = false;
+    notifyDiscontinuity = true;
+    lastSeekPositionUs = 0;
+    extractedSamplesCountAtStartOfLoad = 0;
+    for (SampleQueue sampleQueue : sampleQueues) {
+      sampleQueue.reset();
+    }
+    callback.onContinueLoadingRequested(this);
+  }
+
+  private boolean suppressRead() {
+    return notifyDiscontinuity || isPendingReset();
   }
 
   // Loader.Callback implementation.
@@ -368,46 +474,82 @@ import java.util.Arrays;
   @Override
   public void onLoadCompleted(ExtractingLoadable loadable, long elapsedRealtimeMs,
       long loadDurationMs) {
-    copyLengthFromLoader(loadable);
-    loadingFinished = true;
     if (durationUs == C.TIME_UNSET) {
       long largestQueuedTimestampUs = getLargestQueuedTimestampUs();
       durationUs = largestQueuedTimestampUs == Long.MIN_VALUE ? 0
           : largestQueuedTimestampUs + DEFAULT_LAST_SAMPLE_DURATION_US;
-      sourceListener.onSourceInfoRefreshed(
-          new SinglePeriodTimeline(durationUs, seekMap.isSeekable()), null);
+      listener.onSourceInfoRefreshed(durationUs, seekMap.isSeekable());
     }
+    eventDispatcher.loadCompleted(
+        loadable.dataSpec,
+        C.DATA_TYPE_MEDIA,
+        C.TRACK_TYPE_UNKNOWN,
+        /* trackFormat= */ null,
+        C.SELECTION_REASON_UNKNOWN,
+        /* trackSelectionData= */ null,
+        /* mediaStartTimeUs= */ loadable.seekTimeUs,
+        durationUs,
+        elapsedRealtimeMs,
+        loadDurationMs,
+        loadable.bytesLoaded);
+    copyLengthFromLoader(loadable);
+    loadingFinished = true;
     callback.onContinueLoadingRequested(this);
   }
 
   @Override
   public void onLoadCanceled(ExtractingLoadable loadable, long elapsedRealtimeMs,
       long loadDurationMs, boolean released) {
-    if (released) {
-      return;
-    }
-    copyLengthFromLoader(loadable);
-    for (SampleQueue sampleQueue : sampleQueues) {
-      sampleQueue.reset(true);
-    }
-    if (enabledTrackCount > 0) {
-      callback.onContinueLoadingRequested(this);
+    eventDispatcher.loadCanceled(
+        loadable.dataSpec,
+        C.DATA_TYPE_MEDIA,
+        C.TRACK_TYPE_UNKNOWN,
+        /* trackFormat= */ null,
+        C.SELECTION_REASON_UNKNOWN,
+        /* trackSelectionData= */ null,
+        /* mediaStartTimeUs= */ loadable.seekTimeUs,
+        durationUs,
+        elapsedRealtimeMs,
+        loadDurationMs,
+        loadable.bytesLoaded);
+    if (!released) {
+      copyLengthFromLoader(loadable);
+      for (SampleQueue sampleQueue : sampleQueues) {
+        sampleQueue.reset();
+      }
+      if (enabledTrackCount > 0) {
+        callback.onContinueLoadingRequested(this);
+      }
     }
   }
 
   @Override
   public int onLoadError(ExtractingLoadable loadable, long elapsedRealtimeMs,
       long loadDurationMs, IOException error) {
+    boolean isErrorFatal = isLoadableExceptionFatal(error);
+    eventDispatcher.loadError(
+        loadable.dataSpec,
+        C.DATA_TYPE_MEDIA,
+        C.TRACK_TYPE_UNKNOWN,
+        /* trackFormat= */ null,
+        C.SELECTION_REASON_UNKNOWN,
+        /* trackSelectionData= */ null,
+        /* mediaStartTimeUs= */ loadable.seekTimeUs,
+        durationUs,
+        elapsedRealtimeMs,
+        loadDurationMs,
+        loadable.bytesLoaded,
+        error,
+        /* wasCanceled= */ isErrorFatal);
     copyLengthFromLoader(loadable);
-    notifyLoadError(error);
-    if (isLoadableExceptionFatal(error)) {
+    if (isErrorFatal) {
       return Loader.DONT_RETRY_FATAL;
     }
     int extractedSamplesCount = getExtractedSamplesCount();
     boolean madeProgress = extractedSamplesCount > extractedSamplesCountAtStartOfLoad;
-    configureRetry(loadable); // May reset the sample queues.
-    extractedSamplesCountAtStartOfLoad = getExtractedSamplesCount();
-    return madeProgress ? Loader.RETRY_RESET_ERROR_COUNT : Loader.RETRY;
+    return configureRetry(loadable, extractedSamplesCount)
+        ? (madeProgress ? Loader.RETRY_RESET_ERROR_COUNT : Loader.RETRY)
+        : Loader.DONT_RETRY;
   }
 
   // ExtractorOutput implementation. Called by the loading thread.
@@ -464,6 +606,7 @@ import java.util.Arrays;
     TrackGroup[] trackArray = new TrackGroup[trackCount];
     trackIsAudioVideoFlags = new boolean[trackCount];
     trackEnabledStates = new boolean[trackCount];
+    trackFormatNotificationSent = new boolean[trackCount];
     durationUs = seekMap.getDurationUs();
     for (int i = 0; i < trackCount; i++) {
       Format trackFormat = sampleQueues[i].getUpstreamFormat();
@@ -474,9 +617,12 @@ import java.util.Arrays;
       haveAudioVideoTracks |= isAudioVideo;
     }
     tracks = new TrackGroupArray(trackArray);
+    if (minLoadableRetryCount == ExtractorMediaSource.MIN_RETRY_COUNT_DEFAULT_FOR_MEDIA
+        && length == C.LENGTH_UNSET && seekMap.getDurationUs() == C.TIME_UNSET) {
+      actualMinLoadableRetryCount = ExtractorMediaSource.DEFAULT_MIN_LOADABLE_RETRY_COUNT_LIVE;
+    }
     prepared = true;
-    sourceListener.onSourceInfoRefreshed(
-        new SinglePeriodTimeline(durationUs, seekMap.isSeekable()), null);
+    listener.onSourceInfoRefreshed(durationUs, seekMap.isSeekable());
     callback.onPrepared(this);
   }
 
@@ -496,40 +642,90 @@ import java.util.Arrays;
         pendingResetPositionUs = C.TIME_UNSET;
         return;
       }
-      loadable.setLoadPosition(seekMap.getPosition(pendingResetPositionUs), pendingResetPositionUs);
+      loadable.setLoadPosition(
+          seekMap.getSeekPoints(pendingResetPositionUs).first.position, pendingResetPositionUs);
       pendingResetPositionUs = C.TIME_UNSET;
     }
     extractedSamplesCountAtStartOfLoad = getExtractedSamplesCount();
-
-    int minRetryCount = minLoadableRetryCount;
-    if (minRetryCount == ExtractorMediaSource.MIN_RETRY_COUNT_DEFAULT_FOR_MEDIA) {
-      // We assume on-demand before we're prepared.
-      minRetryCount = !prepared || length != C.LENGTH_UNSET
-          || (seekMap != null && seekMap.getDurationUs() != C.TIME_UNSET)
-          ? ExtractorMediaSource.DEFAULT_MIN_LOADABLE_RETRY_COUNT_ON_DEMAND
-          : ExtractorMediaSource.DEFAULT_MIN_LOADABLE_RETRY_COUNT_LIVE;
-    }
-    loader.startLoading(loadable, this, minRetryCount);
+    long elapsedRealtimeMs = loader.startLoading(loadable, this, actualMinLoadableRetryCount);
+    eventDispatcher.loadStarted(
+        loadable.dataSpec,
+        C.DATA_TYPE_MEDIA,
+        C.TRACK_TYPE_UNKNOWN,
+        /* trackFormat= */ null,
+        C.SELECTION_REASON_UNKNOWN,
+        /* trackSelectionData= */ null,
+        /* mediaStartTimeUs= */ loadable.seekTimeUs,
+        durationUs,
+        elapsedRealtimeMs);
   }
 
-  private void configureRetry(ExtractingLoadable loadable) {
+  /**
+   * Called to configure a retry when a load error occurs.
+   *
+   * @param loadable The current loadable for which the error was encountered.
+   * @param currentExtractedSampleCount The current number of samples that have been extracted into
+   *     the sample queues.
+   * @return Whether the loader should retry with the current loadable. False indicates a deferred
+   *     retry.
+   */
+  private boolean configureRetry(ExtractingLoadable loadable, int currentExtractedSampleCount) {
     if (length != C.LENGTH_UNSET
         || (seekMap != null && seekMap.getDurationUs() != C.TIME_UNSET)) {
       // We're playing an on-demand stream. Resume the current loadable, which will
       // request data starting from the point it left off.
+      extractedSamplesCountAtStartOfLoad = currentExtractedSampleCount;
+      return true;
+    } else if (prepared && !suppressRead()) {
+      // We're playing a stream of unknown length and duration. Assume it's live, and therefore that
+      // the data at the uri is a continuously shifting window of the latest available media. For
+      // this case there's no way to continue loading from where a previous load finished, so it's
+      // necessary to load from the start whenever commencing a new load. Deferring the retry until
+      // we run out of buffered data makes for a much better user experience. See:
+      // https://github.com/google/ExoPlayer/issues/1606.
+      // Note that the suppressRead() check means only a single deferred retry can occur without
+      // progress being made. Any subsequent failures without progress will go through the else
+      // block below.
+      pendingDeferredRetry = true;
+      return false;
     } else {
-      // We're playing a stream of unknown length and duration. Assume it's live, and
-      // therefore that the data at the uri is a continuously shifting window of the latest
-      // available media. For this case there's no way to continue loading from where a
-      // previous load finished, so it's necessary to load from the start whenever commencing
-      // a new load.
+      // This is the same case as above, except in this case there's no value in deferring the retry
+      // because there's no buffered data to be read. This case also covers an on-demand stream with
+      // unknown length that has yet to be prepared. This case cannot be disambiguated from the live
+      // stream case, so we have no option but to load from the start.
+      notifyDiscontinuity = prepared;
       lastSeekPositionUs = 0;
-      notifyReset = prepared;
+      extractedSamplesCountAtStartOfLoad = 0;
       for (SampleQueue sampleQueue : sampleQueues) {
-        sampleQueue.reset(true);
+        sampleQueue.reset();
       }
       loadable.setLoadPosition(0, 0);
+      return true;
     }
+  }
+
+  /**
+   * Attempts to seek to the specified position within the sample queues.
+   *
+   * @param positionUs The seek position in microseconds.
+   * @return Whether the in-buffer seek was successful.
+   */
+  private boolean seekInsideBufferUs(long positionUs) {
+    int trackCount = sampleQueues.length;
+    for (int i = 0; i < trackCount; i++) {
+      SampleQueue sampleQueue = sampleQueues[i];
+      sampleQueue.rewind();
+      boolean seekInsideQueue = sampleQueue.advanceTo(positionUs, true, false)
+          != SampleQueue.ADVANCE_FAILED;
+      // If we have AV tracks then an in-buffer seek is successful if the seek into every AV queue
+      // is successful. We ignore whether seeks within non-AV queues are successful in this case, as
+      // they may be sparse or poorly interleaved. If we only have non-AV tracks then a seek is
+      // successful only if the seek into every queue succeeds.
+      if (!seekInsideQueue && (trackIsAudioVideoFlags[i] || !haveAudioVideoTracks)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private int getExtractedSamplesCount() {
@@ -553,19 +749,8 @@ import java.util.Arrays;
     return pendingResetPositionUs != C.TIME_UNSET;
   }
 
-  private boolean isLoadableExceptionFatal(IOException e) {
+  private static boolean isLoadableExceptionFatal(IOException e) {
     return e instanceof UnrecognizedInputFormatException;
-  }
-
-  private void notifyLoadError(final IOException error) {
-    if (eventHandler != null && eventListener != null) {
-      eventHandler.post(new Runnable()  {
-        @Override
-        public void run() {
-          eventListener.onLoadError(error);
-        }
-      });
-    }
   }
 
   private final class SampleStreamImpl implements SampleStream {
@@ -593,8 +778,8 @@ import java.util.Arrays;
     }
 
     @Override
-    public void skipData(long positionUs) {
-      ExtractorMediaPeriod.this.skipData(track, positionUs);
+    public int skipData(long positionUs) {
+      return ExtractorMediaPeriod.this.skipData(track, positionUs);
     }
 
   }
@@ -614,7 +799,9 @@ import java.util.Arrays;
 
     private boolean pendingExtractorSeek;
     private long seekTimeUs;
+    private DataSpec dataSpec;
     private long length;
+    private long bytesLoaded;
 
     public ExtractingLoadable(Uri uri, DataSource dataSource, ExtractorHolder extractorHolder,
         ConditionVariable loadCondition) {
@@ -650,7 +837,8 @@ import java.util.Arrays;
         ExtractorInput input = null;
         try {
           long position = positionHolder.position;
-          length = dataSource.open(new DataSpec(uri, position, C.LENGTH_UNSET, customCacheKey));
+          dataSpec = new DataSpec(uri, position, C.LENGTH_UNSET, customCacheKey);
+          length = dataSource.open(dataSpec);
           if (length != C.LENGTH_UNSET) {
             length += position;
           }
@@ -674,6 +862,7 @@ import java.util.Arrays;
             result = Extractor.RESULT_CONTINUE;
           } else if (input != null) {
             positionHolder.position = input.getPosition();
+            bytesLoaded = positionHolder.position - dataSpec.absoluteStreamPosition;
           }
           Util.closeQuietly(dataSource);
         }

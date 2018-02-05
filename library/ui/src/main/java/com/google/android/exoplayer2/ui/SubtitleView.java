@@ -19,13 +19,14 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Canvas;
+import android.support.annotation.Nullable;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.accessibility.CaptioningManager;
 import com.google.android.exoplayer2.text.CaptionStyleCompat;
 import com.google.android.exoplayer2.text.Cue;
-import com.google.android.exoplayer2.text.TextRenderer;
+import com.google.android.exoplayer2.text.TextOutput;
 import com.google.android.exoplayer2.util.Util;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +34,7 @@ import java.util.List;
 /**
  * A view for displaying subtitle {@link Cue}s.
  */
-public final class SubtitleView extends View implements TextRenderer.Output {
+public final class SubtitleView extends View implements TextOutput {
 
   /**
    * The default fractional text size.
@@ -87,9 +88,9 @@ public final class SubtitleView extends View implements TextRenderer.Output {
   /**
    * Sets the cues to be displayed by the view.
    *
-   * @param cues The cues to display.
+   * @param cues The cues to display, or null to clear the cues.
    */
-  public void setCues(List<Cue> cues) {
+  public void setCues(@Nullable List<Cue> cues) {
     if (this.cues == cues) {
       return;
     }

@@ -19,6 +19,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.support.annotation.IntDef;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import com.google.android.exoplayer2.audio.AudioCapabilities;
 import com.google.android.exoplayer2.audio.AudioProcessor;
@@ -27,7 +28,9 @@ import com.google.android.exoplayer2.audio.MediaCodecAudioRenderer;
 import com.google.android.exoplayer2.drm.DrmSessionManager;
 import com.google.android.exoplayer2.drm.FrameworkMediaCrypto;
 import com.google.android.exoplayer2.mediacodec.MediaCodecSelector;
+import com.google.android.exoplayer2.metadata.MetadataOutput;
 import com.google.android.exoplayer2.metadata.MetadataRenderer;
+import com.google.android.exoplayer2.text.TextOutput;
 import com.google.android.exoplayer2.text.TextRenderer;
 import com.google.android.exoplayer2.trackselection.TrackSelector;
 import com.google.android.exoplayer2.video.MediaCodecVideoRenderer;
@@ -79,7 +82,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
   protected static final int MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY = 50;
 
   private final Context context;
-  private final DrmSessionManager<FrameworkMediaCrypto> drmSessionManager;
+  @Nullable private final DrmSessionManager<FrameworkMediaCrypto> drmSessionManager;
   private final @ExtensionRendererMode int extensionRendererMode;
   private final long allowedVideoJoiningTimeMs;
 
@@ -96,29 +99,28 @@ public class DefaultRenderersFactory implements RenderersFactory {
    *     playbacks are not required.
    */
   public DefaultRenderersFactory(Context context,
-      DrmSessionManager<FrameworkMediaCrypto> drmSessionManager) {
+      @Nullable DrmSessionManager<FrameworkMediaCrypto> drmSessionManager) {
     this(context, drmSessionManager, EXTENSION_RENDERER_MODE_OFF);
   }
 
   /**
    * @param context A {@link Context}.
    * @param drmSessionManager An optional {@link DrmSessionManager}. May be null if DRM protected
-   *     playbacks are not required..
+   *     playbacks are not required.
    * @param extensionRendererMode The extension renderer mode, which determines if and how
    *     available extension renderers are used. Note that extensions must be included in the
    *     application build for them to be considered available.
    */
   public DefaultRenderersFactory(Context context,
-      DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
+      @Nullable DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
       @ExtensionRendererMode int extensionRendererMode) {
-    this(context, drmSessionManager, extensionRendererMode,
-        DEFAULT_ALLOWED_VIDEO_JOINING_TIME_MS);
+    this(context, drmSessionManager, extensionRendererMode, DEFAULT_ALLOWED_VIDEO_JOINING_TIME_MS);
   }
 
   /**
    * @param context A {@link Context}.
    * @param drmSessionManager An optional {@link DrmSessionManager}. May be null if DRM protected
-   *     playbacks are not required..
+   *     playbacks are not required.
    * @param extensionRendererMode The extension renderer mode, which determines if and how
    *     available extension renderers are used. Note that extensions must be included in the
    *     application build for them to be considered available.
@@ -126,7 +128,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
    *     to seamlessly join an ongoing playback.
    */
   public DefaultRenderersFactory(Context context,
-      DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
+      @Nullable DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
       @ExtensionRendererMode int extensionRendererMode, long allowedVideoJoiningTimeMs) {
     this.context = context;
     this.drmSessionManager = drmSessionManager;
@@ -138,7 +140,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
   public Renderer[] createRenderers(Handler eventHandler,
       VideoRendererEventListener videoRendererEventListener,
       AudioRendererEventListener audioRendererEventListener,
-      TextRenderer.Output textRendererOutput, MetadataRenderer.Output metadataRendererOutput) {
+      TextOutput textRendererOutput, MetadataOutput metadataRendererOutput) {
     ArrayList<Renderer> renderersList = new ArrayList<>();
     buildVideoRenderers(context, drmSessionManager, allowedVideoJoiningTimeMs,
         eventHandler, videoRendererEventListener, extensionRendererMode, renderersList);
@@ -166,9 +168,10 @@ public class DefaultRenderersFactory implements RenderersFactory {
    * @param out An array to which the built renderers should be appended.
    */
   protected void buildVideoRenderers(Context context,
-      DrmSessionManager<FrameworkMediaCrypto> drmSessionManager, long allowedVideoJoiningTimeMs,
-      Handler eventHandler, VideoRendererEventListener eventListener,
-      @ExtensionRendererMode int extensionRendererMode, ArrayList<Renderer> out) {
+      @Nullable DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
+      long allowedVideoJoiningTimeMs, Handler eventHandler,
+      VideoRendererEventListener eventListener, @ExtensionRendererMode int extensionRendererMode,
+      ArrayList<Renderer> out) {
     out.add(new MediaCodecVideoRenderer(context, MediaCodecSelector.DEFAULT,
         allowedVideoJoiningTimeMs, drmSessionManager, false, eventHandler, eventListener,
         MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY));
@@ -182,18 +185,32 @@ public class DefaultRenderersFactory implements RenderersFactory {
     }
 
     try {
-      Class<?> clazz =
-          Class.forName("com.google.android.exoplayer2.ext.vp9.LibvpxVideoRenderer");
-      Constructor<?> constructor = clazz.getConstructor(boolean.class, long.class, Handler.class,
-          VideoRendererEventListener.class, int.class);
-      Renderer renderer = (Renderer) constructor.newInstance(true, allowedVideoJoiningTimeMs,
-          eventHandler, eventListener, MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY);
+      // Full class names used for constructor args so the LINT rule triggers if any of them move.
+      // LINT.IfChange
+      Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.vp9.LibvpxVideoRenderer");
+      Constructor<?> constructor =
+          clazz.getConstructor(
+              boolean.class,
+              long.class,
+              android.os.Handler.class,
+              com.google.android.exoplayer2.video.VideoRendererEventListener.class,
+              int.class);
+      // LINT.ThenChange(../../../../../../../proguard-rules.txt)
+      Renderer renderer =
+          (Renderer)
+              constructor.newInstance(
+                  true,
+                  allowedVideoJoiningTimeMs,
+                  eventHandler,
+                  eventListener,
+                  MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY);
       out.add(extensionRendererIndex++, renderer);
       Log.i(TAG, "Loaded LibvpxVideoRenderer.");
     } catch (ClassNotFoundException e) {
       // Expected if the app was built without the extension.
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      // The extension is present, but instantiation failed.
+      throw new RuntimeException("Error instantiating VP9 extension", e);
     }
   }
 
@@ -211,7 +228,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
    * @param out An array to which the built renderers should be appended.
    */
   protected void buildAudioRenderers(Context context,
-      DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
+      @Nullable DrmSessionManager<FrameworkMediaCrypto> drmSessionManager,
       AudioProcessor[] audioProcessors, Handler eventHandler,
       AudioRendererEventListener eventListener, @ExtensionRendererMode int extensionRendererMode,
       ArrayList<Renderer> out) {
@@ -227,48 +244,67 @@ public class DefaultRenderersFactory implements RenderersFactory {
     }
 
     try {
-      Class<?> clazz =
-          Class.forName("com.google.android.exoplayer2.ext.opus.LibopusAudioRenderer");
-      Constructor<?> constructor = clazz.getConstructor(Handler.class,
-          AudioRendererEventListener.class, AudioProcessor[].class);
-      Renderer renderer = (Renderer) constructor.newInstance(eventHandler, eventListener,
-          audioProcessors);
+      // Full class names used for constructor args so the LINT rule triggers if any of them move.
+      // LINT.IfChange
+      Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.opus.LibopusAudioRenderer");
+      Constructor<?> constructor =
+          clazz.getConstructor(
+              android.os.Handler.class,
+              com.google.android.exoplayer2.audio.AudioRendererEventListener.class,
+              com.google.android.exoplayer2.audio.AudioProcessor[].class);
+      // LINT.ThenChange(../../../../../../../proguard-rules.txt)
+      Renderer renderer =
+          (Renderer) constructor.newInstance(eventHandler, eventListener, audioProcessors);
       out.add(extensionRendererIndex++, renderer);
       Log.i(TAG, "Loaded LibopusAudioRenderer.");
     } catch (ClassNotFoundException e) {
       // Expected if the app was built without the extension.
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      // The extension is present, but instantiation failed.
+      throw new RuntimeException("Error instantiating Opus extension", e);
     }
 
     try {
-      Class<?> clazz =
-          Class.forName("com.google.android.exoplayer2.ext.flac.LibflacAudioRenderer");
-      Constructor<?> constructor = clazz.getConstructor(Handler.class,
-          AudioRendererEventListener.class, AudioProcessor[].class);
-      Renderer renderer = (Renderer) constructor.newInstance(eventHandler, eventListener,
-          audioProcessors);
+      // Full class names used for constructor args so the LINT rule triggers if any of them move.
+      // LINT.IfChange
+      Class<?> clazz = Class.forName("com.google.android.exoplayer2.ext.flac.LibflacAudioRenderer");
+      Constructor<?> constructor =
+          clazz.getConstructor(
+              android.os.Handler.class,
+              com.google.android.exoplayer2.audio.AudioRendererEventListener.class,
+              com.google.android.exoplayer2.audio.AudioProcessor[].class);
+      // LINT.ThenChange(../../../../../../../proguard-rules.txt)
+      Renderer renderer =
+          (Renderer) constructor.newInstance(eventHandler, eventListener, audioProcessors);
       out.add(extensionRendererIndex++, renderer);
       Log.i(TAG, "Loaded LibflacAudioRenderer.");
     } catch (ClassNotFoundException e) {
       // Expected if the app was built without the extension.
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      // The extension is present, but instantiation failed.
+      throw new RuntimeException("Error instantiating FLAC extension", e);
     }
 
     try {
+      // Full class names used for constructor args so the LINT rule triggers if any of them move.
+      // LINT.IfChange
       Class<?> clazz =
           Class.forName("com.google.android.exoplayer2.ext.ffmpeg.FfmpegAudioRenderer");
-      Constructor<?> constructor = clazz.getConstructor(Handler.class,
-          AudioRendererEventListener.class, AudioProcessor[].class);
-      Renderer renderer = (Renderer) constructor.newInstance(eventHandler, eventListener,
-          audioProcessors);
+      Constructor<?> constructor =
+          clazz.getConstructor(
+              android.os.Handler.class,
+              com.google.android.exoplayer2.audio.AudioRendererEventListener.class,
+              com.google.android.exoplayer2.audio.AudioProcessor[].class);
+      // LINT.ThenChange(../../../../../../../proguard-rules.txt)
+      Renderer renderer =
+          (Renderer) constructor.newInstance(eventHandler, eventListener, audioProcessors);
       out.add(extensionRendererIndex++, renderer);
       Log.i(TAG, "Loaded FfmpegAudioRenderer.");
     } catch (ClassNotFoundException e) {
       // Expected if the app was built without the extension.
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      // The extension is present, but instantiation failed.
+      throw new RuntimeException("Error instantiating FFmpeg extension", e);
     }
   }
 
@@ -282,8 +318,8 @@ public class DefaultRenderersFactory implements RenderersFactory {
    * @param extensionRendererMode The extension renderer mode.
    * @param out An array to which the built renderers should be appended.
    */
-  protected void buildTextRenderers(Context context, TextRenderer.Output output,
-      Looper outputLooper, @ExtensionRendererMode int extensionRendererMode,
+  protected void buildTextRenderers(Context context, TextOutput output, Looper outputLooper,
+      @ExtensionRendererMode int extensionRendererMode,
       ArrayList<Renderer> out) {
     out.add(new TextRenderer(output, outputLooper));
   }
@@ -298,9 +334,8 @@ public class DefaultRenderersFactory implements RenderersFactory {
    * @param extensionRendererMode The extension renderer mode.
    * @param out An array to which the built renderers should be appended.
    */
-  protected void buildMetadataRenderers(Context context, MetadataRenderer.Output output,
-      Looper outputLooper, @ExtensionRendererMode int extensionRendererMode,
-      ArrayList<Renderer> out) {
+  protected void buildMetadataRenderers(Context context, MetadataOutput output, Looper outputLooper,
+      @ExtensionRendererMode int extensionRendererMode, ArrayList<Renderer> out) {
     out.add(new MetadataRenderer(output, outputLooper));
   }
 

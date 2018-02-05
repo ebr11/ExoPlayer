@@ -15,7 +15,10 @@
  */
 package com.google.android.exoplayer2.testutil;
 
-import android.os.Handler;
+import static com.google.common.truth.Truth.assertWithMessage;
+
+import android.os.ConditionVariable;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Surface;
@@ -24,41 +27,39 @@ import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.ExoPlayerFactory;
 import com.google.android.exoplayer2.Format;
-import com.google.android.exoplayer2.PlaybackParameters;
+import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.RenderersFactory;
 import com.google.android.exoplayer2.SimpleExoPlayer;
-import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.audio.AudioRendererEventListener;
-import com.google.android.exoplayer2.audio.AudioTrack;
+import com.google.android.exoplayer2.audio.DefaultAudioSink;
 import com.google.android.exoplayer2.decoder.DecoderCounters;
 import com.google.android.exoplayer2.drm.DrmSessionManager;
 import com.google.android.exoplayer2.drm.FrameworkMediaCrypto;
 import com.google.android.exoplayer2.source.MediaSource;
-import com.google.android.exoplayer2.source.TrackGroupArray;
 import com.google.android.exoplayer2.testutil.HostActivity.HostedTest;
 import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector;
-import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.upstream.BandwidthMeter;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.TransferListener;
+import com.google.android.exoplayer2.util.Clock;
+import com.google.android.exoplayer2.util.HandlerWrapper;
 import com.google.android.exoplayer2.util.Util;
 import com.google.android.exoplayer2.video.VideoRendererEventListener;
-import junit.framework.Assert;
 
 /**
  * A {@link HostedTest} for {@link ExoPlayer} playback tests.
  */
-public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListener,
+public abstract class ExoHostedTest extends Player.DefaultEventListener implements HostedTest,
     AudioRendererEventListener, VideoRendererEventListener {
 
   static {
-    // ExoPlayer's AudioTrack class is able to work around spurious timestamps reported by the
-    // platform (by ignoring them). Disable this workaround, since we're interested in testing
-    // that the underlying platform is behaving correctly.
-    AudioTrack.failOnSpuriousAudioTimestamp = true;
+    // DefaultAudioSink is able to work around spurious timestamps reported by the platform (by
+    // ignoring them). Disable this workaround, since we're interested in testing that the
+    // underlying platform is behaving correctly.
+    DefaultAudioSink.failOnSpuriousAudioTimestamp = true;
   }
 
   public static final long MAX_PLAYING_TIME_DISCREPANCY_MS = 2000;
@@ -71,15 +72,19 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
   private final long expectedPlayingTimeMs;
   private final DecoderCounters videoDecoderCounters;
   private final DecoderCounters audioDecoderCounters;
+  private final ConditionVariable testFinished;
 
   private ActionSchedule pendingSchedule;
-  private Handler actionHandler;
+  private HandlerWrapper actionHandler;
   private MappingTrackSelector trackSelector;
   private SimpleExoPlayer player;
   private Surface surface;
   private ExoPlaybackException playerError;
+  private Player.EventListener playerEventListener;
+  private VideoRendererEventListener videoDebugListener;
+  private AudioRendererEventListener audioDebugListener;
   private boolean playerWasPrepared;
-  private boolean playerFinished;
+
   private boolean playing;
   private long totalPlayingTimeMs;
   private long lastPlayingStartTimeMs;
@@ -112,8 +117,9 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
     this.tag = tag;
     this.expectedPlayingTimeMs = expectedPlayingTimeMs;
     this.failOnPlayerError = failOnPlayerError;
-    videoDecoderCounters = new DecoderCounters();
-    audioDecoderCounters = new DecoderCounters();
+    this.testFinished = new ConditionVariable();
+    this.videoDecoderCounters = new DecoderCounters();
+    this.audioDecoderCounters = new DecoderCounters();
   }
 
   /**
@@ -125,7 +131,37 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
     if (player == null) {
       pendingSchedule = schedule;
     } else {
-      schedule.start(player, trackSelector, surface, actionHandler);
+      schedule.start(player, trackSelector, surface, actionHandler, /* callback= */ null);
+    }
+  }
+
+  /**
+   * Sets an {@link Player.EventListener} to listen for ExoPlayer events during the test.
+   */
+  public final void setEventListener(Player.EventListener eventListener) {
+    this.playerEventListener = eventListener;
+    if (player != null) {
+      player.addListener(eventListener);
+    }
+  }
+
+  /**
+   * Sets an {@link VideoRendererEventListener} to listen for video debug events during the test.
+   */
+  public final void setVideoDebugListener(VideoRendererEventListener videoDebugListener) {
+    this.videoDebugListener = videoDebugListener;
+    if (player != null) {
+      player.addVideoDebugListener(videoDebugListener);
+    }
+  }
+
+  /**
+   * Sets an {@link AudioRendererEventListener} to listen for audio debug events during the test.
+   */
+  public final void setAudioDebugListener(AudioRendererEventListener audioDebugListener) {
+    this.audioDebugListener = audioDebugListener;
+    if (player != null) {
+      player.addAudioDebugListener(audioDebugListener);
     }
   }
 
@@ -141,29 +177,35 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
     DrmSessionManager<FrameworkMediaCrypto> drmSessionManager = buildDrmSessionManager(userAgent);
     player = buildExoPlayer(host, surface, trackSelector, drmSessionManager);
     player.prepare(buildSource(host, Util.getUserAgent(host, userAgent), bandwidthMeter));
+    if (playerEventListener != null) {
+      player.addListener(playerEventListener);
+    }
+    if (videoDebugListener != null) {
+      player.addVideoDebugListener(videoDebugListener);
+    }
+    if (audioDebugListener != null) {
+      player.addAudioDebugListener(audioDebugListener);
+    }
     player.addListener(this);
-    player.setAudioDebugListener(this);
-    player.setVideoDebugListener(this);
+    player.addAudioDebugListener(this);
+    player.addVideoDebugListener(this);
     player.setPlayWhenReady(true);
-    actionHandler = new Handler();
+    actionHandler = Clock.DEFAULT.createHandler(Looper.myLooper(), /* callback= */ null);
     // Schedule any pending actions.
     if (pendingSchedule != null) {
-      pendingSchedule.start(player, trackSelector, surface, actionHandler);
+      pendingSchedule.start(player, trackSelector, surface, actionHandler, /* callback= */ null);
       pendingSchedule = null;
     }
   }
 
   @Override
-  public final boolean canStop() {
-    return playerFinished;
+  public final boolean blockUntilStopped(long timeoutMs) {
+    return testFinished.block(timeoutMs);
   }
 
   @Override
-  public final void onStop() {
-    actionHandler.removeCallbacksAndMessages(null);
-    sourceDurationMs = player.getDuration();
-    player.release();
-    player = null;
+  public final boolean forceStop() {
+    return stopTest();
   }
 
   @Override
@@ -178,35 +220,28 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
       // Assert that the playback spanned the correct duration of time.
       long minAllowedActualPlayingTimeMs = playingTimeToAssertMs - MAX_PLAYING_TIME_DISCREPANCY_MS;
       long maxAllowedActualPlayingTimeMs = playingTimeToAssertMs + MAX_PLAYING_TIME_DISCREPANCY_MS;
-      Assert.assertTrue("Total playing time: " + totalPlayingTimeMs + ". Expected: "
-          + playingTimeToAssertMs, minAllowedActualPlayingTimeMs <= totalPlayingTimeMs
-          && totalPlayingTimeMs <= maxAllowedActualPlayingTimeMs);
+      assertWithMessage(
+              "Total playing time: " + totalPlayingTimeMs + ". Expected: " + playingTimeToAssertMs)
+          .that(
+              minAllowedActualPlayingTimeMs <= totalPlayingTimeMs
+                  && totalPlayingTimeMs <= maxAllowedActualPlayingTimeMs)
+          .isTrue();
     }
     // Make any additional assertions.
     assertPassed(audioDecoderCounters, videoDecoderCounters);
   }
 
-  // ExoPlayer.EventListener
-
-  @Override
-  public void onLoadingChanged(boolean isLoading) {
-    // Do nothing.
-  }
-
-  @Override
-  public void onTracksChanged(TrackGroupArray trackGroups, TrackSelectionArray trackSelections) {
-    // Do nothing.
-  }
+  // Player.EventListener
 
   @Override
   public final void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
     Log.d(tag, "state [" + playWhenReady + ", " + playbackState + "]");
-    playerWasPrepared |= playbackState != ExoPlayer.STATE_IDLE;
-    if (playbackState == ExoPlayer.STATE_ENDED
-        || (playbackState == ExoPlayer.STATE_IDLE && playerWasPrepared)) {
-      playerFinished = true;
+    playerWasPrepared |= playbackState != Player.STATE_IDLE;
+    if (playbackState == Player.STATE_ENDED
+        || (playbackState == Player.STATE_IDLE && playerWasPrepared)) {
+      stopTest();
     }
-    boolean playing = playWhenReady && playbackState == ExoPlayer.STATE_READY;
+    boolean playing = playWhenReady && playbackState == Player.STATE_READY;
     if (!this.playing && playing) {
       lastPlayingStartTimeMs = SystemClock.elapsedRealtime();
     } else if (this.playing && !playing) {
@@ -216,30 +251,10 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
   }
 
   @Override
-  public void onRepeatModeChanged(int repeatMode) {
-    // Do nothing.
-  }
-
-  @Override
   public final void onPlayerError(ExoPlaybackException error) {
     playerWasPrepared = true;
     playerError = error;
     onPlayerErrorInternal(error);
-  }
-
-  @Override
-  public final void onPositionDiscontinuity() {
-    // Do nothing.
-  }
-
-  @Override
-  public final void onPlaybackParametersChanged(PlaybackParameters playbackParameters) {
-    // Do nothing.
-  }
-
-  @Override
-  public final void onTimelineChanged(Timeline timeline, Object manifest) {
-    // Do nothing.
   }
 
   // AudioRendererEventListener
@@ -272,7 +287,7 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
   }
 
   @Override
-  public void onAudioTrackUnderrun(int bufferSize, long bufferSizeMs, long elapsedSinceLastFeedMs) {
+  public void onAudioSinkUnderrun(int bufferSize, long bufferSizeMs, long elapsedSinceLastFeedMs) {
     Log.e(tag, "audioTrackUnderrun [" + bufferSize + ", " + bufferSizeMs + ", "
         + elapsedSinceLastFeedMs + "]", null);
   }
@@ -318,6 +333,25 @@ public abstract class ExoHostedTest implements HostedTest, ExoPlayer.EventListen
   }
 
   // Internal logic
+
+  private boolean stopTest() {
+    if (player == null) {
+      return false;
+    }
+    actionHandler.removeCallbacksAndMessages(null);
+    sourceDurationMs = player.getDuration();
+    player.release();
+    player = null;
+    // We post opening of the finished condition so that any events posted to the main thread as a
+    // result of player.release() are guaranteed to be handled before the test returns.
+    actionHandler.post(new Runnable() {
+      @Override
+      public void run() {
+        testFinished.open();
+      }
+    });
+    return true;
+  }
 
   protected DrmSessionManager<FrameworkMediaCrypto> buildDrmSessionManager(String userAgent) {
     // Do nothing. Interested subclasses may override.

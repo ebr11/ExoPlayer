@@ -1,7 +1,7 @@
 seekMap:
   isSeekable = true
   duration = 2741000
-  getPosition(0) = 8457
+  getPosition(0) = [[timeUs=0, position=8457]]
 numberOfTracks = 1
 track 0:
   format:
@@ -26,6 +26,7 @@ track 0:
     drmInitData = -
     initializationData:
       data = length 42, hash 83F6895
+  total output bytes = 55652
   sample count = 12
   sample 0:
     time = 1792000

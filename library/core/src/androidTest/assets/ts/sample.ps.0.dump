@@ -1,7 +1,7 @@
 seekMap:
   isSeekable = false
   duration = UNSET TIME
-  getPosition(0) = 0
+  getPosition(0) = [[timeUs=0, position=0]]
 numberOfTracks = 2
 track 192:
   format:
@@ -25,6 +25,7 @@ track 192:
     language = null
     drmInitData = -
     initializationData:
+  total output bytes = 1671
   sample count = 4
   sample 0:
     time = 29088
@@ -65,11 +66,12 @@ track 224:
     drmInitData = -
     initializationData:
       data = length 22, hash 743CC6F8
+  total output bytes = 44056
   sample count = 2
   sample 0:
     time = 40000
     flags = 1
-    data = length 20616, hash CA38A5B5
+    data = length 20646, hash 576390B
   sample 1:
     time = 80000
     flags = 0

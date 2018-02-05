@@ -15,6 +15,8 @@
  */
 package com.google.android.exoplayer2.testutil;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.android.exoplayer2.BaseRenderer;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlaybackException;
@@ -22,30 +24,50 @@ import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.FormatHolder;
 import com.google.android.exoplayer2.Renderer;
 import com.google.android.exoplayer2.decoder.DecoderInputBuffer;
+import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.MimeTypes;
-import junit.framework.Assert;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Fake {@link Renderer} that supports any format with the matching MIME type. The renderer
- * verifies that it reads a given {@link Format}.
+ * verifies that it reads one of the given {@link Format}s.
  */
 public class FakeRenderer extends BaseRenderer {
 
-  private final Format expectedFormat;
+  /**
+   * The amount of time ahead of the current playback position that the renderer reads from the
+   * source. A real renderer will typically read ahead by a small amount due to pipelining through
+   * decoders and the media output path.
+   */
+  private static final long SOURCE_READAHEAD_US = 250000;
 
+  private final List<Format> expectedFormats;
+  private final DecoderInputBuffer buffer;
+  private final FormatHolder formatHolder;
+
+  private long playbackPositionUs;
+  private long lastSamplePositionUs;
+
+  public boolean isEnded;
   public int positionResetCount;
   public int formatReadCount;
-  public int bufferReadCount;
-  public boolean isEnded;
+  public int sampleBufferReadCount;
 
-  public FakeRenderer(Format expectedFormat) {
-    super(expectedFormat == null ? C.TRACK_TYPE_UNKNOWN
-        : MimeTypes.getTrackType(expectedFormat.sampleMimeType));
-    this.expectedFormat = expectedFormat;
+  public FakeRenderer(Format... expectedFormats) {
+    super(expectedFormats.length == 0 ? C.TRACK_TYPE_UNKNOWN
+        : MimeTypes.getTrackType(expectedFormats[0].sampleMimeType));
+    this.expectedFormats = Collections.unmodifiableList(Arrays.asList(expectedFormats));
+    buffer = new DecoderInputBuffer(DecoderInputBuffer.BUFFER_REPLACEMENT_MODE_NORMAL);
+    formatHolder = new FormatHolder();
+    lastSamplePositionUs = Long.MIN_VALUE;
   }
 
   @Override
   protected void onPositionReset(long positionUs, boolean joining) throws ExoPlaybackException {
+    playbackPositionUs = positionUs;
+    lastSamplePositionUs = Long.MIN_VALUE;
     positionResetCount++;
     isEnded = false;
   }
@@ -55,26 +77,31 @@ public class FakeRenderer extends BaseRenderer {
     if (isEnded) {
       return;
     }
-
-    // Verify the format matches the expected format.
-    FormatHolder formatHolder = new FormatHolder();
-    DecoderInputBuffer buffer =
-        new DecoderInputBuffer(DecoderInputBuffer.BUFFER_REPLACEMENT_MODE_NORMAL);
-    int result = readSource(formatHolder, buffer, false);
-    if (result == C.RESULT_FORMAT_READ) {
-      formatReadCount++;
-      Assert.assertEquals(expectedFormat, formatHolder.format);
-    } else if (result == C.RESULT_BUFFER_READ) {
-      bufferReadCount++;
-      if (buffer.isEndOfStream()) {
-        isEnded = true;
+    playbackPositionUs = positionUs;
+    while (lastSamplePositionUs < positionUs + SOURCE_READAHEAD_US) {
+      formatHolder.format = null;
+      buffer.clear();
+      int result = readSource(formatHolder, buffer, false);
+      if (result == C.RESULT_FORMAT_READ) {
+        formatReadCount++;
+        assertThat(expectedFormats).contains(formatHolder.format);
+      } else if (result == C.RESULT_BUFFER_READ) {
+        if (buffer.isEndOfStream()) {
+          isEnded = true;
+          return;
+        }
+        lastSamplePositionUs = buffer.timeUs;
+        sampleBufferReadCount++;
+      } else {
+        Assertions.checkState(result == C.RESULT_NOTHING_READ);
+        return;
       }
     }
   }
 
   @Override
   public boolean isReady() {
-    return isSourceReady();
+    return lastSamplePositionUs >= playbackPositionUs || isSourceReady();
   }
 
   @Override
@@ -84,8 +111,8 @@ public class FakeRenderer extends BaseRenderer {
 
   @Override
   public int supportsFormat(Format format) throws ExoPlaybackException {
-    return getTrackType() == MimeTypes.getTrackType(format.sampleMimeType) ? FORMAT_HANDLED
-        : FORMAT_UNSUPPORTED_TYPE;
+    return getTrackType() == MimeTypes.getTrackType(format.sampleMimeType)
+        ? (FORMAT_HANDLED | ADAPTIVE_SEAMLESS) : FORMAT_UNSUPPORTED_TYPE;
   }
 
 }
