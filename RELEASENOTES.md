@@ -81,6 +81,8 @@
 * CacheDataSource: Check periodically if it's possible to read from/write to
   cache after deciding to bypass cache.
 * IMA extension:
+    * Fix the player getting stuck when an ad group fails to load
+      ([#3584](https://github.com/google/ExoPlayer/issues/3584)).
     * Work around loadAd not being called beore the LOADED AdEvent arrives
       ([#3552](https://github.com/google/ExoPlayer/issues/3552)).
     * Add support for playing non-Extractor content MediaSources in
@@ -89,6 +91,11 @@
 * `EventLogger` moved from the demo app into the core library.
 * Fix ANR issue on Huawei P8 Lite
   ([#3724](https://github.com/google/ExoPlayer/issues/3724)).
+* Fix potential NPE when removing media sources from a
+  DynamicConcatenatingMediaSource
+  ([#3796](https://github.com/google/ExoPlayer/issues/3796)).
+* Open source DownloadService, DownloadManager and related classes
+  ([#2643](https://github.com/google/ExoPlayer/issues/2643)).
 
 ### 2.6.1 ###
 
