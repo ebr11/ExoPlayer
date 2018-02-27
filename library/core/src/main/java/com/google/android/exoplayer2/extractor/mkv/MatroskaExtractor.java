@@ -376,6 +376,10 @@ public final class MatroskaExtractor implements Extractor {
   // Extractor outputs.
   private ExtractorOutput extractorOutput;
 
+  // -emby mods
+  public static boolean ForceDtsHd = false;
+  // end mods
+
   public MatroskaExtractor() {
     this(0);
   }
@@ -1761,7 +1765,7 @@ public final class MatroskaExtractor implements Extractor {
           break;
         case CODEC_ID_DTS:
         case CODEC_ID_DTS_EXPRESS:
-          mimeType = MimeTypes.AUDIO_DTS;
+          mimeType = ForceDtsHd ? MimeTypes.AUDIO_DTS_HD : MimeTypes.AUDIO_DTS;
           break;
         case CODEC_ID_DTS_LOSSLESS:
           mimeType = MimeTypes.AUDIO_DTS_HD;
