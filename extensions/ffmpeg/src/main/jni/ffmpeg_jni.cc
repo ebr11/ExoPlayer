@@ -271,7 +271,7 @@ int decodePacket(AVCodecContext *context, AVPacket *packet,
     } else {
       resampleContext = avresample_alloc_context();
       av_opt_set_int(resampleContext, "in_channel_layout",  channelLayout, 0);
-      av_opt_set_int(resampleContext, "out_channel_layout", AV_CH_LAYOUT_STEREO, 0);
+      av_opt_set_int(resampleContext, "out_channel_layout", channelLayout, 0);
       av_opt_set_int(resampleContext, "in_sample_rate", sampleRate, 0);
       av_opt_set_int(resampleContext, "out_sample_rate", sampleRate, 0);
       av_opt_set_int(resampleContext, "in_sample_fmt", sampleFormat, 0);
