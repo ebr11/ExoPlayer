@@ -149,7 +149,7 @@ DECODER_FUNC(jint, ffmpegGetChannelCount, jlong context) {
     LOGE("Context must be non-NULL.");
     return -1;
   }
-  return ((AVCodecContext *) context)->channels;
+  return 2; //((AVCodecContext *) context)->channels;
 }
 
 DECODER_FUNC(jint, ffmpegGetSampleRate, jlong context) {
@@ -259,7 +259,7 @@ int decodePacket(AVCodecContext *context, AVPacket *packet,
 
     // Resample output.
     AVSampleFormat sampleFormat = context->sample_fmt;
-    int channelCount = context->channels;
+    int channelCount = 2; //context->channels;
     int channelLayout = context->channel_layout;
     int sampleRate = context->sample_rate;
     int sampleCount = frame->nb_samples;
@@ -271,7 +271,7 @@ int decodePacket(AVCodecContext *context, AVPacket *packet,
     } else {
       resampleContext = avresample_alloc_context();
       av_opt_set_int(resampleContext, "in_channel_layout",  channelLayout, 0);
-      av_opt_set_int(resampleContext, "out_channel_layout", channelLayout, 0);
+      av_opt_set_int(resampleContext, "out_channel_layout", AV_CH_LAYOUT_STEREO, 0);
       av_opt_set_int(resampleContext, "in_sample_rate", sampleRate, 0);
       av_opt_set_int(resampleContext, "out_sample_rate", sampleRate, 0);
       av_opt_set_int(resampleContext, "in_sample_fmt", sampleFormat, 0);
