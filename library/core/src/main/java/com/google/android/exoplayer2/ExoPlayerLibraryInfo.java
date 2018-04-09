@@ -33,7 +33,7 @@ public final class ExoPlayerLibraryInfo {
 
   /** The version of the library expressed as {@code "ExoPlayerLib/" + VERSION}. */
   // Intentionally hardcoded. Do not derive from other constants (e.g. VERSION) or vice versa.
-  public static final String VERSION_SLASHY = "ExoPlayerLib/2.7.0/Emby";
+  public static final String VERSION_SLASHY = "ExoPlayerLib/2.7.3/Emby";
 
   /**
    * The version of the library expressed as an integer, for example 1002003.
