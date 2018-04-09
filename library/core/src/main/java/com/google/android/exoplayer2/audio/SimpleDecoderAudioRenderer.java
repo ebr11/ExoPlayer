@@ -522,8 +522,8 @@ public abstract class SimpleDecoderAudioRenderer extends BaseRenderer implements
 
   @Override
   protected void onStopped() {
-    audioSink.pause();
     updateCurrentPosition();
+    audioSink.pause();
   }
 
   @Override
@@ -651,8 +651,8 @@ public abstract class SimpleDecoderAudioRenderer extends BaseRenderer implements
       audioTrackNeedsConfigure = true;
     }
 
-    encoderDelay = newFormat.encoderDelay == Format.NO_VALUE ? 0 : newFormat.encoderDelay;
-    encoderPadding = newFormat.encoderPadding == Format.NO_VALUE ? 0 : newFormat.encoderPadding;
+    encoderDelay = newFormat.encoderDelay;
+    encoderPadding = newFormat.encoderPadding;
 
     eventDispatcher.inputFormatChanged(newFormat);
   }

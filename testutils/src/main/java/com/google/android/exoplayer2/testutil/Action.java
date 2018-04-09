@@ -447,6 +447,36 @@ public abstract class Action {
 
   }
 
+  /** Throws a playback exception on the playback thread. */
+  public static final class ThrowPlaybackException extends Action {
+
+    private final ExoPlaybackException exception;
+
+    /**
+     * @param tag A tag to use for logging.
+     * @param exception The exception to throw.
+     */
+    public ThrowPlaybackException(String tag, ExoPlaybackException exception) {
+      super(tag, "ThrowPlaybackException:" + exception);
+      this.exception = exception;
+    }
+
+    @Override
+    protected void doActionImpl(
+        SimpleExoPlayer player, MappingTrackSelector trackSelector, Surface surface) {
+      player
+          .createMessage(
+              new Target() {
+                @Override
+                public void handleMessage(int messageType, Object payload)
+                    throws ExoPlaybackException {
+                  throw exception;
+                }
+              })
+          .send();
+    }
+  }
+
   /**
    * Schedules a play action to be executed, waits until the player reaches the specified position,
    * and pauses the player again.
@@ -514,12 +544,16 @@ public abstract class Action {
    */
   public static final class WaitForTimelineChanged extends Action {
 
-    private final Timeline expectedTimeline;
+    private final @Nullable Timeline expectedTimeline;
 
     /**
+     * Creates action waiting for a timeline change.
+     *
      * @param tag A tag to use for logging.
+     * @param expectedTimeline The expected timeline to wait for. If null, wait for any timeline
+     *     change.
      */
-    public WaitForTimelineChanged(String tag, Timeline expectedTimeline) {
+    public WaitForTimelineChanged(String tag, @Nullable Timeline expectedTimeline) {
       super(tag, "WaitForTimelineChanged");
       this.expectedTimeline = expectedTimeline;
     }
@@ -534,18 +568,19 @@ public abstract class Action {
       if (nextAction == null) {
         return;
       }
-      Player.EventListener listener = new Player.DefaultEventListener() {
-        @Override
-        public void onTimelineChanged(Timeline timeline, Object manifest,
-            @Player.TimelineChangeReason int reason) {
-          if (timeline.equals(expectedTimeline)) {
-            player.removeListener(this);
-            nextAction.schedule(player, trackSelector, surface, handler);
-          }
-        }
-      };
+      Player.EventListener listener =
+          new Player.DefaultEventListener() {
+            @Override
+            public void onTimelineChanged(
+                Timeline timeline, Object manifest, @Player.TimelineChangeReason int reason) {
+              if (expectedTimeline == null || timeline.equals(expectedTimeline)) {
+                player.removeListener(this);
+                nextAction.schedule(player, trackSelector, surface, handler);
+              }
+            }
+          };
       player.addListener(listener);
-      if (player.getCurrentTimeline().equals(expectedTimeline)) {
+      if (expectedTimeline != null && player.getCurrentTimeline().equals(expectedTimeline)) {
         player.removeListener(listener);
         nextAction.schedule(player, trackSelector, surface, handler);
       }

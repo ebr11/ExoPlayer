@@ -25,6 +25,7 @@ import com.google.android.exoplayer2.Timeline.Window;
 import com.google.android.exoplayer2.source.ConcatenatingMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.MediaSource.MediaPeriodId;
+import com.google.android.exoplayer2.source.MediaSourceEventListener.EventDispatcher;
 import com.google.android.exoplayer2.source.TrackGroup;
 import com.google.android.exoplayer2.source.TrackGroupArray;
 import com.google.android.exoplayer2.source.ads.AdPlaybackState;
@@ -44,6 +45,7 @@ import com.google.android.exoplayer2.testutil.FakeTrackSelection;
 import com.google.android.exoplayer2.testutil.FakeTrackSelector;
 import com.google.android.exoplayer2.testutil.RobolectricUtil;
 import com.google.android.exoplayer2.upstream.Allocator;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -179,8 +181,7 @@ public final class ExoPlayerTest {
             // media clock position will be the start of the timeline until the stream is set to be
             // final, at which point it jumps to the end of the timeline allowing the playing period
             // to advance.
-            // TODO: Avoid hard-coding ExoPlayerImplInternal.RENDERER_TIMESTAMP_OFFSET_US.
-            return isCurrentStreamFinal() ? 60000030 : 60000000;
+            return isCurrentStreamFinal() ? 30 : 0;
           }
 
           @Override
@@ -227,9 +228,9 @@ public final class ExoPlayerTest {
     MediaSource secondSource =
         new FakeMediaSource(timeline, new Object(), Builder.VIDEO_FORMAT) {
           @Override
-          public synchronized void prepareSource(
-              ExoPlayer player, boolean isTopLevelSource, Listener listener) {
-            super.prepareSource(player, isTopLevelSource, listener);
+          public synchronized void prepareSourceInternal(
+              ExoPlayer player, boolean isTopLevelSource) {
+            super.prepareSourceInternal(player, isTopLevelSource);
             // We've queued a source info refresh on the playback thread's event queue. Allow the
             // test thread to prepare the player with the third source, and block this thread (the
             // playback thread) until the test thread's call to prepare() has returned.
@@ -572,8 +573,11 @@ public final class ExoPlayerTest {
         new FakeMediaSource(timeline, null, Builder.VIDEO_FORMAT) {
           @Override
           protected FakeMediaPeriod createFakeMediaPeriod(
-              MediaPeriodId id, TrackGroupArray trackGroupArray, Allocator allocator) {
-            FakeMediaPeriod mediaPeriod = new FakeMediaPeriod(trackGroupArray);
+              MediaPeriodId id,
+              TrackGroupArray trackGroupArray,
+              Allocator allocator,
+              EventDispatcher eventDispatcher) {
+            FakeMediaPeriod mediaPeriod = new FakeMediaPeriod(trackGroupArray, eventDispatcher);
             mediaPeriod.setSeekToUsOffset(10);
             return mediaPeriod;
           }
@@ -603,8 +607,11 @@ public final class ExoPlayerTest {
         new FakeMediaSource(timeline, null, Builder.VIDEO_FORMAT) {
           @Override
           protected FakeMediaPeriod createFakeMediaPeriod(
-              MediaPeriodId id, TrackGroupArray trackGroupArray, Allocator allocator) {
-            FakeMediaPeriod mediaPeriod = new FakeMediaPeriod(trackGroupArray);
+              MediaPeriodId id,
+              TrackGroupArray trackGroupArray,
+              Allocator allocator,
+              EventDispatcher eventDispatcher) {
+            FakeMediaPeriod mediaPeriod = new FakeMediaPeriod(trackGroupArray, eventDispatcher);
             mediaPeriod.setDiscontinuityPositionUs(10);
             return mediaPeriod;
           }
@@ -625,8 +632,11 @@ public final class ExoPlayerTest {
         new FakeMediaSource(timeline, null, Builder.VIDEO_FORMAT) {
           @Override
           protected FakeMediaPeriod createFakeMediaPeriod(
-              MediaPeriodId id, TrackGroupArray trackGroupArray, Allocator allocator) {
-            FakeMediaPeriod mediaPeriod = new FakeMediaPeriod(trackGroupArray);
+              MediaPeriodId id,
+              TrackGroupArray trackGroupArray,
+              Allocator allocator,
+              EventDispatcher eventDispatcher) {
+            FakeMediaPeriod mediaPeriod = new FakeMediaPeriod(trackGroupArray, eventDispatcher);
             mediaPeriod.setDiscontinuityPositionUs(0);
             return mediaPeriod;
           }
@@ -716,13 +726,7 @@ public final class ExoPlayerTest {
         new ActionSchedule.Builder("testChangeTrackSelection")
             .pause()
             .waitForPlaybackState(Player.STATE_READY)
-            .executeRunnable(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    trackSelector.setRendererDisabled(0, true);
-                  }
-                })
+            .disableRenderer(0)
             .play()
             .build();
 
@@ -763,13 +767,7 @@ public final class ExoPlayerTest {
         new ActionSchedule.Builder("testReuseTrackSelection")
             .pause()
             .waitForPlaybackState(Player.STATE_READY)
-            .executeRunnable(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    trackSelector.setRendererDisabled(0, true);
-                  }
-                })
+            .disableRenderer(0)
             .play()
             .build();
 
@@ -877,10 +875,13 @@ public final class ExoPlayerTest {
         new FakeMediaSource(new FakeTimeline(/* windowCount= */ 1), null, Builder.VIDEO_FORMAT) {
           @Override
           protected FakeMediaPeriod createFakeMediaPeriod(
-              MediaPeriodId id, TrackGroupArray trackGroupArray, Allocator allocator) {
+              MediaPeriodId id,
+              TrackGroupArray trackGroupArray,
+              Allocator allocator,
+              EventDispatcher eventDispatcher) {
             // Defer completing preparation of the period until playback parameters have been set.
             fakeMediaPeriodHolder[0] =
-                new FakeMediaPeriod(trackGroupArray, /* deferOnPrepared= */ true);
+                new FakeMediaPeriod(trackGroupArray, eventDispatcher, /* deferOnPrepared= */ true);
             createPeriodCalledCountDownLatch.countDown();
             return fakeMediaPeriodHolder[0];
           }
@@ -901,7 +902,7 @@ public final class ExoPlayerTest {
                   }
                 })
             // Set playback parameters (while the fake media period is not yet prepared).
-            .setPlaybackParameters(new PlaybackParameters(2f, 2f))
+            .setPlaybackParameters(new PlaybackParameters(/* speed= */ 2f, /* pitch= */ 2f))
             // Complete preparation of the fake media period.
             .executeRunnable(
                 new Runnable() {
@@ -1170,10 +1171,8 @@ public final class ExoPlayerTest {
     Timeline timeline = new FakeTimeline(/* windowCount= */ 1);
     ActionSchedule actionSchedule =
         new ActionSchedule.Builder("testReprepareAfterPlaybackError")
-            .waitForPlaybackState(Player.STATE_BUFFERING)
-            // Cause an internal exception by seeking to an invalid position while the media source
-            // is still being prepared and the player doesn't immediately know it will fail.
-            .seek(/* windowIndex= */ 100, /* positionMs= */ 0)
+            .waitForPlaybackState(Player.STATE_READY)
+            .throwPlaybackException(ExoPlaybackException.createForSource(new IOException()))
             .waitForPlaybackState(Player.STATE_IDLE)
             .prepareSource(
                 new FakeMediaSource(timeline, /* manifest= */ null),
@@ -1204,11 +1203,8 @@ public final class ExoPlayerTest {
     ActionSchedule actionSchedule =
         new ActionSchedule.Builder("testReprepareAfterPlaybackError")
             .pause()
-            .waitForPlaybackState(Player.STATE_BUFFERING)
-            // Cause an internal exception by seeking to an invalid position while the media source
-            // is still being prepared and the player doesn't immediately know it will fail.
-            .seek(/* windowIndex= */ 100, /* positionMs= */ 0)
-            .waitForSeekProcessed()
+            .waitForPlaybackState(Player.STATE_READY)
+            .throwPlaybackException(ExoPlaybackException.createForSource(new IOException()))
             .waitForPlaybackState(Player.STATE_IDLE)
             .seek(/* positionMs= */ 50)
             .waitForSeekProcessed()
@@ -1247,8 +1243,7 @@ public final class ExoPlayerTest {
     testRunner.assertTimelinesEqual(timeline, timeline);
     testRunner.assertTimelineChangeReasonsEqual(
         Player.TIMELINE_CHANGE_REASON_PREPARED, Player.TIMELINE_CHANGE_REASON_PREPARED);
-    testRunner.assertPositionDiscontinuityReasonsEqual(
-        Player.DISCONTINUITY_REASON_SEEK, Player.DISCONTINUITY_REASON_SEEK);
+    testRunner.assertPositionDiscontinuityReasonsEqual(Player.DISCONTINUITY_REASON_SEEK);
     assertThat(positionHolder[0]).isEqualTo(50);
     assertThat(positionHolder[1]).isEqualTo(50);
   }
@@ -1287,6 +1282,104 @@ public final class ExoPlayerTest {
     }
     testRunner.assertTimelinesEqual(timeline);
     testRunner.assertTimelineChangeReasonsEqual(Player.TIMELINE_CHANGE_REASON_PREPARED);
+  }
+
+  @Test
+  public void testPlaybackErrorAndReprepareDoesNotResetPosition() throws Exception {
+    final Timeline timeline = new FakeTimeline(/* windowCount= */ 2);
+    final long[] positionHolder = new long[3];
+    final int[] windowIndexHolder = new int[3];
+    final FakeMediaSource secondMediaSource =
+        new FakeMediaSource(/* timeline= */ null, /* manifest= */ null);
+    ActionSchedule actionSchedule =
+        new ActionSchedule.Builder("testPlaybackErrorDoesNotResetPosition")
+            .pause()
+            .waitForPlaybackState(Player.STATE_READY)
+            .playUntilPosition(/* windowIndex= */ 1, /* positionMs= */ 500)
+            .throwPlaybackException(ExoPlaybackException.createForSource(new IOException()))
+            .waitForPlaybackState(Player.STATE_IDLE)
+            .executeRunnable(
+                new PlayerRunnable() {
+                  @Override
+                  public void run(SimpleExoPlayer player) {
+                    // Position while in error state
+                    positionHolder[0] = player.getCurrentPosition();
+                    windowIndexHolder[0] = player.getCurrentWindowIndex();
+                  }
+                })
+            .prepareSource(secondMediaSource, /* resetPosition= */ false, /* resetState= */ false)
+            .waitForPlaybackState(Player.STATE_BUFFERING)
+            .executeRunnable(
+                new PlayerRunnable() {
+                  @Override
+                  public void run(SimpleExoPlayer player) {
+                    // Position while repreparing.
+                    positionHolder[1] = player.getCurrentPosition();
+                    windowIndexHolder[1] = player.getCurrentWindowIndex();
+                    secondMediaSource.setNewSourceInfo(timeline, /* newManifest= */ null);
+                  }
+                })
+            .waitForPlaybackState(Player.STATE_READY)
+            .executeRunnable(
+                new PlayerRunnable() {
+                  @Override
+                  public void run(SimpleExoPlayer player) {
+                    // Position after repreparation finished.
+                    positionHolder[2] = player.getCurrentPosition();
+                    windowIndexHolder[2] = player.getCurrentWindowIndex();
+                  }
+                })
+            .play()
+            .build();
+    ExoPlayerTestRunner testRunner =
+        new ExoPlayerTestRunner.Builder()
+            .setTimeline(timeline)
+            .setActionSchedule(actionSchedule)
+            .build();
+    try {
+      testRunner.start().blockUntilActionScheduleFinished(TIMEOUT_MS).blockUntilEnded(TIMEOUT_MS);
+      fail();
+    } catch (ExoPlaybackException e) {
+      // Expected exception.
+    }
+    assertThat(positionHolder[0]).isAtLeast(500L);
+    assertThat(positionHolder[1]).isEqualTo(positionHolder[0]);
+    assertThat(positionHolder[2]).isEqualTo(positionHolder[0]);
+    assertThat(windowIndexHolder[0]).isEqualTo(1);
+    assertThat(windowIndexHolder[1]).isEqualTo(1);
+    assertThat(windowIndexHolder[2]).isEqualTo(1);
+  }
+
+  @Test
+  public void testPlaybackErrorTwiceStillKeepsTimeline() throws Exception {
+    final Timeline timeline = new FakeTimeline(/* windowCount= */ 1);
+    final FakeMediaSource mediaSource2 =
+        new FakeMediaSource(/* timeline= */ null, /* manifest= */ null);
+    ActionSchedule actionSchedule =
+        new ActionSchedule.Builder("testPlaybackErrorDoesNotResetPosition")
+            .pause()
+            .waitForPlaybackState(Player.STATE_READY)
+            .throwPlaybackException(ExoPlaybackException.createForSource(new IOException()))
+            .waitForPlaybackState(Player.STATE_IDLE)
+            .prepareSource(mediaSource2, /* resetPosition= */ false, /* resetState= */ false)
+            .waitForPlaybackState(Player.STATE_BUFFERING)
+            .throwPlaybackException(ExoPlaybackException.createForSource(new IOException()))
+            .waitForPlaybackState(Player.STATE_IDLE)
+            .build();
+    ExoPlayerTestRunner testRunner =
+        new ExoPlayerTestRunner.Builder()
+            .setTimeline(timeline)
+            .setActionSchedule(actionSchedule)
+            .build();
+    try {
+      testRunner.start().blockUntilActionScheduleFinished(TIMEOUT_MS).blockUntilEnded(TIMEOUT_MS);
+      fail();
+    } catch (ExoPlaybackException e) {
+      // Expected exception.
+    }
+    testRunner.assertTimelinesEqual(timeline, timeline);
+    testRunner.assertTimelineChangeReasonsEqual(
+        Player.TIMELINE_CHANGE_REASON_PREPARED, Player.TIMELINE_CHANGE_REASON_PREPARED);
   }
 
   @Test
@@ -1422,7 +1515,8 @@ public final class ExoPlayerTest {
                 new FakeMediaSource(timeline, null),
                 /* resetPosition= */ false,
                 /* resetState= */ true)
-            .waitForPlaybackState(Player.STATE_READY)
+            .waitForPlaybackState(Player.STATE_BUFFERING)
+            .waitForPlaybackState(Player.STATE_ENDED)
             .build();
     new Builder()
         .setTimeline(timeline)

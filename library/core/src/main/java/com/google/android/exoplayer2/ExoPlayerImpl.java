@@ -92,7 +92,6 @@ import java.util.concurrent.CopyOnWriteArraySet;
     this.listeners = new CopyOnWriteArraySet<>();
     emptyTrackSelectorResult =
         new TrackSelectorResult(
-            TrackGroupArray.EMPTY,
             new boolean[renderers.length],
             new TrackSelectionArray(new TrackSelection[renderers.length]),
             null,
@@ -108,7 +107,11 @@ import java.util.concurrent.CopyOnWriteArraySet;
       }
     };
     playbackInfo =
-        new PlaybackInfo(Timeline.EMPTY, /* startPositionUs= */ 0, emptyTrackSelectorResult);
+        new PlaybackInfo(
+            Timeline.EMPTY,
+            /* startPositionUs= */ 0,
+            TrackGroupArray.EMPTY,
+            emptyTrackSelectorResult);
     internalPlayer =
         new ExoPlayerImplInternal(
             renderers,
@@ -170,7 +173,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
     // because it uses a callback.
     hasPendingPrepare = true;
     pendingOperationAcks++;
-    internalPlayer.prepare(mediaSource, resetPosition);
+    internalPlayer.prepare(mediaSource, resetPosition, resetState);
     updatePlaybackInfo(
         playbackInfo,
         /* positionDiscontinuity= */ false,
@@ -306,6 +309,14 @@ import java.util.concurrent.CopyOnWriteArraySet;
       seekParameters = SeekParameters.DEFAULT;
     }
     internalPlayer.setSeekParameters(seekParameters);
+  }
+
+  @Override
+  public @Nullable Object getCurrentTag() {
+    int windowIndex = getCurrentWindowIndex();
+    return windowIndex > playbackInfo.timeline.getWindowCount()
+        ? null
+        : playbackInfo.timeline.getWindow(windowIndex, window, /* setTag= */ true).tag;
   }
 
   @Override
@@ -512,7 +523,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 
   @Override
   public TrackGroupArray getCurrentTrackGroups() {
-    return playbackInfo.trackSelectorResult.groups;
+    return playbackInfo.trackGroups;
   }
 
   @Override
@@ -567,10 +578,6 @@ import java.util.concurrent.CopyOnWriteArraySet;
       @DiscontinuityReason int positionDiscontinuityReason) {
     pendingOperationAcks -= operationAcks;
     if (pendingOperationAcks == 0) {
-      if (playbackInfo.timeline == null) {
-        // Replace internal null timeline with externally visible empty timeline.
-        playbackInfo = playbackInfo.copyWithTimeline(Timeline.EMPTY, playbackInfo.manifest);
-      }
       if (playbackInfo.startPositionUs == C.TIME_UNSET) {
         // Replace internal unset start position with externally visible start position of zero.
         playbackInfo =
@@ -620,6 +627,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
         playbackInfo.contentPositionUs,
         playbackState,
         /* isLoading= */ false,
+        resetState ? TrackGroupArray.EMPTY : playbackInfo.trackGroups,
         resetState ? emptyTrackSelectorResult : playbackInfo.trackSelectorResult);
   }
 
@@ -652,7 +660,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
       trackSelector.onSelectionActivated(playbackInfo.trackSelectorResult.info);
       for (Player.EventListener listener : listeners) {
         listener.onTracksChanged(
-            playbackInfo.trackSelectorResult.groups, playbackInfo.trackSelectorResult.selections);
+            playbackInfo.trackGroups, playbackInfo.trackSelectorResult.selections);
       }
     }
     if (isLoadingChanged) {

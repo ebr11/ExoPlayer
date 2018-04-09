@@ -430,7 +430,8 @@ public class DownloadManagerTest {
                           Mockito.mock(Cache.class), DummyDataSource.FACTORY),
                       maxActiveDownloadTasks,
                       MIN_RETRY_COUNT,
-                      actionFile.getAbsolutePath());
+                      actionFile.getAbsolutePath(),
+                      ProgressiveDownloadAction.DESERIALIZER);
               downloadManager.addListener(testDownloadListener);
               downloadManager.startDownloads();
             }
@@ -607,8 +608,7 @@ public class DownloadManagerTest {
     }
 
     private FakeDownloadAction assertStopped() {
-      assertState(DownloadState.STATE_STOPPING);
-      return assertState(DownloadState.STATE_WAITING);
+      return assertState(DownloadState.STATE_QUEUED);
     }
 
     private FakeDownloadAction assertState(@State int expectedState) {
