@@ -2,8 +2,100 @@
 
 ### dev-v2 (not yet released) ###
 
+* Optimize seeking in FMP4 by enabling seeking to the nearest sync sample within
+  a fragment. This benefits standalone FMP4 playbacks, DASH and SmoothStreaming.
+* Moved initial bitrate estimate from `AdaptiveTrackSelection` to
+  `DefaultBandwidthMeter`.
+* Updated default max buffer length in `DefaultLoadControl`.
+* UI components:
+  * Add support for listening to `AspectRatioFrameLayout`'s aspect ratio update
+    ([#3736](https://github.com/google/ExoPlayer/issues/3736)).
+  * Add PlayerNotificationManager.
 * Downloading: Add `DownloadService`, `DownloadManager` and
   related classes ([#2643](https://github.com/google/ExoPlayer/issues/2643)).
+* MediaSources:
+  * Allow reusing media sources after they have been released and
+    also in parallel to allow adding them multiple times to a concatenation.
+    ([#3498](https://github.com/google/ExoPlayer/issues/3498)).
+  * Merged `DynamicConcatenatingMediaSource` into `ConcatenatingMediaSource` and
+    deprecated `DynamicConcatenatingMediaSource`.
+  * Allow clipping of child media sources where the period and window have a
+    non-zero offset with `ClippingMediaSource`.
+  * Allow adding and removing `MediaSourceEventListener`s to MediaSources after
+    they have been created. Listening to events is now supported for all
+    media sources including composite sources.
+  * Added callbacks to `MediaSourceEventListener` to get notified when media
+    periods are created, released and being read from.
+  * Support live stream clipping with `ClippingMediaSource`.
+  * Allow setting custom tags for all media sources in their factories. The tag
+    of the current window can be retrieved with `ExoPlayer.getCurrentTag`.
+* Audio:
+  * Factor out `AudioTrack` position tracking from `DefaultAudioSink`.
+  * Fix an issue where the playback position would pause just after playback
+    begins, and poll the audio timestamp less frequently once it starts
+    advancing ([#3841](https://github.com/google/ExoPlayer/issues/3841)).
+  * Add an option to skip silent audio in `PlaybackParameters`
+    ((#2635)[https://github.com/google/ExoPlayer/issues/2635]).
+  * Fix an issue where playback of TrueHD streams would get stuck after seeking
+    due to not finding a syncframe
+    ((#3845)[https://github.com/google/ExoPlayer/issues/3845]).
+* Caching:
+  * Add release method to Cache interface.
+  * Prevent multiple instances of SimpleCache in the same folder.
+    Previous instance must be released.
+  * Store redirected URI
+  ([#2360](https://github.com/google/ExoPlayer/issues/2360)).
+* DRM:
+  * Allow multiple listeners for `DefaultDrmSessionManager`.
+  * Pass `DrmSessionManager` to `ExoPlayerFactory` instead of `RendererFactory`.
+* Removed default renderer time offset of 60000000 from internal player. The
+  actual renderer timestamp offset can be obtained by listening to
+  `BaseRenderer.onStreamChanged`.
+* HLS: Fix playlist loading error propagation when the current selection does
+  not include all of the playlist's variants.
+* Fix ClearKey decryption error if the key contains a forward slash
+  ([#4075](https://github.com/google/ExoPlayer/issues/4075)).
+* Fix IllegalStateException when switching surface on Huawei P9 Lite
+  ([#4084](https://github.com/google/ExoPlayer/issues/4084)).
+
+### 2.7.3 ###
+
+* Fix ProGuard configuration for Cast, IMA and OkHttp extensions.
+* Update OkHttp extension to depend on OkHttp 3.10.0.
+
+### 2.7.2 ###
+
+* Gradle: Upgrade Gradle version from 4.1 to 4.4 so it can work with Android
+  Studio 3.1 ([#3708](https://github.com/google/ExoPlayer/issues/3708)).
+* Match codecs starting with "mp4a" to different Audio MimeTypes
+  ([#3779](https://github.com/google/ExoPlayer/issues/3779)).
+* Fix ANR issue on Redmi 4X and Redmi Note 4
+  ([#4006](https://github.com/google/ExoPlayer/issues/4006)).
+* Fix handling of zero padded strings when parsing Matroska streams
+  ([#4010](https://github.com/google/ExoPlayer/issues/4010)).
+* Fix "Decoder input buffer too small" error when playing some FLAC streams.
+* MediaSession extension: Omit fast forward and rewind actions when media is not
+  seekable ([#4001](https://github.com/google/ExoPlayer/issues/4001)).
+
+### 2.7.1 ###
+
+* Gradle: Replaced 'compile' (deprecated) with 'implementation' and
+  'api'. This may lead to build breakage for applications upgrading from
+  previous version that rely on indirect dependencies of certain modules. In
+  such cases, application developers need to add the missing dependency to
+  their gradle file. You can read more about the new dependency configurations
+  [here](https://developer.android.com/studio/build/gradle-plugin-3-0-0-migration.html#new_configurations).
+* HlsMediaSource: Make HLS periods start at zero instead of the epoch.
+  Applications that rely on HLS timelines having a period starting at
+  the epoch will need to update their handling of HLS timelines. The program
+  date time is still available via the informational
+  `Timeline.Window.windowStartTimeMs` field
+  ([#3865](https://github.com/google/ExoPlayer/issues/3865),
+  [#3888](https://github.com/google/ExoPlayer/issues/3888)).
+* Enable seeking in MP4 streams where duration is set incorrectly in the track
+  header ([#3926](https://github.com/google/ExoPlayer/issues/3926)).
+* Video: Force rendering a frame periodically in `MediaCodecVideoRenderer` and
+  `LibvpxVideoRenderer`, even if it is late.
 
 ### 2.7.0 ###
 
@@ -26,7 +118,7 @@
 * Add `ExoPlayer.setSeekParameters` for controlling how seek operations are
   performed. The `SeekParameters` class contains defaults for exact seeking and
   seeking to the closest sync points before, either side or after specified seek
-  positions. `SeekParameters` are not currently supported when playing HLS 
+  positions. `SeekParameters` are not currently supported when playing HLS
   streams.
 * DefaultTrackSelector:
   * Replace `DefaultTrackSelector.Parameters` copy methods with a builder.
@@ -59,7 +151,7 @@
   ([#3630](https://github.com/google/ExoPlayer/issues/3630)).
 * DASH:
   * Support in-band Emsg events targeting the player with scheme id
-    "urn:mpeg:dash:event:2012" and scheme values "1", "2" and "3".
+    `urn:mpeg:dash:event:2012` and scheme values "1", "2" and "3".
   * Support EventStream elements in DASH manifests.
 * HLS:
     * Add opt-in support for chunkless preparation in HLS. This allows an

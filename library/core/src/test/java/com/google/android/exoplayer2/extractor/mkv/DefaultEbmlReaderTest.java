@@ -90,6 +90,14 @@ public class DefaultEbmlReaderTest {
   }
 
   @Test
+  public void testStringElementWithZeroPadding() throws IOException, InterruptedException {
+    ExtractorInput input = createTestInput(0x42, 0x82, 0x86, 0x41, 0x62, 0x63, 0x00, 0x00, 0x00);
+    TestOutput expected = new TestOutput();
+    expected.stringElement(TestOutput.ID_DOC_TYPE, "Abc");
+    assertEvents(input, expected.events);
+  }
+
+  @Test
   public void testStringElementEmpty() throws IOException, InterruptedException {
     ExtractorInput input = createTestInput(0x42, 0x82, 0x80);
     TestOutput expected = new TestOutput();
@@ -174,22 +182,22 @@ public class DefaultEbmlReaderTest {
     private final List<String> events = new ArrayList<>();
 
     @Override
-    public int getElementType(int id) {
+    public @ElementType int getElementType(int id) {
       switch (id) {
         case ID_EBML:
         case ID_SEGMENT:
-          return EbmlReader.TYPE_MASTER;
+          return TYPE_MASTER;
         case ID_EBML_READ_VERSION:
         case ID_DOC_TYPE_READ_VERSION:
-          return EbmlReader.TYPE_UNSIGNED_INT;
+          return TYPE_UNSIGNED_INT;
         case ID_DOC_TYPE:
-          return EbmlReader.TYPE_STRING;
+          return TYPE_STRING;
         case ID_SIMPLE_BLOCK:
-          return EbmlReader.TYPE_BINARY;
+          return TYPE_BINARY;
         case ID_DURATION:
-          return EbmlReader.TYPE_FLOAT;
+          return TYPE_FLOAT;
         default:
-          return EbmlReader.TYPE_UNKNOWN;
+          return TYPE_UNKNOWN;
       }
     }
 

@@ -40,6 +40,7 @@ import com.google.android.exoplayer2.testutil.Action.SetRepeatMode;
 import com.google.android.exoplayer2.testutil.Action.SetShuffleModeEnabled;
 import com.google.android.exoplayer2.testutil.Action.SetVideoSurface;
 import com.google.android.exoplayer2.testutil.Action.Stop;
+import com.google.android.exoplayer2.testutil.Action.ThrowPlaybackException;
 import com.google.android.exoplayer2.testutil.Action.WaitForPlaybackState;
 import com.google.android.exoplayer2.testutil.Action.WaitForPositionDiscontinuity;
 import com.google.android.exoplayer2.testutil.Action.WaitForSeekProcessed;
@@ -377,10 +378,11 @@ public final class ActionSchedule {
     /**
      * Schedules a delay until the timeline changed to a specified expected timeline.
      *
-     * @param expectedTimeline The expected timeline to wait for.
+     * @param expectedTimeline The expected timeline to wait for. If null, wait for any timeline
+     *     change.
      * @return The builder, for convenience.
      */
-    public Builder waitForTimelineChanged(Timeline expectedTimeline) {
+    public Builder waitForTimelineChanged(@Nullable Timeline expectedTimeline) {
       return apply(new WaitForTimelineChanged(tag, expectedTimeline));
     }
 
@@ -410,6 +412,16 @@ public final class ActionSchedule {
      */
     public Builder executeRunnable(Runnable runnable) {
       return apply(new ExecuteRunnable(tag, runnable));
+    }
+
+    /**
+     * Schedules to throw a playback exception on the playback thread.
+     *
+     * @param exception The exception to throw.
+     * @return The builder, for convenience.
+     */
+    public Builder throwPlaybackException(ExoPlaybackException exception) {
+      return apply(new ThrowPlaybackException(tag, exception));
     }
 
     public ActionSchedule build() {
