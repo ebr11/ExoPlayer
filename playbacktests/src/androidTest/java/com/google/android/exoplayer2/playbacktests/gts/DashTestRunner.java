@@ -50,6 +50,7 @@ import com.google.android.exoplayer2.testutil.ExoHostedTest;
 import com.google.android.exoplayer2.testutil.HostActivity;
 import com.google.android.exoplayer2.testutil.HostActivity.HostedTest;
 import com.google.android.exoplayer2.testutil.MetricsLogger;
+import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.FixedTrackSelection;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector;
 import com.google.android.exoplayer2.trackselection.RandomTrackSelection;
@@ -264,8 +265,8 @@ public final class DashTestRunner {
     }
 
     @Override
-    protected MappingTrackSelector buildTrackSelector(HostActivity host,
-        BandwidthMeter bandwidthMeter) {
+    protected DefaultTrackSelector buildTrackSelector(
+        HostActivity host, BandwidthMeter bandwidthMeter) {
       return trackSelector;
     }
 
@@ -375,7 +376,7 @@ public final class DashTestRunner {
 
   }
 
-  private static final class DashTestTrackSelector extends MappingTrackSelector {
+  private static final class DashTestTrackSelector extends DefaultTrackSelector {
 
     private final String tag;
     private final String audioFormatId;
@@ -393,25 +394,30 @@ public final class DashTestRunner {
     }
 
     @Override
-    protected TrackSelection[] selectTracks(RendererCapabilities[] rendererCapabilities,
-        TrackGroupArray[] rendererTrackGroupArrays, int[][][] rendererFormatSupports)
+    protected TrackSelection[] selectAllTracks(
+        RendererCapabilities[] rendererCapabilities, MappedTrackInfo mappedTrackInfo)
         throws ExoPlaybackException {
       Assertions.checkState(rendererCapabilities[VIDEO_RENDERER_INDEX].getTrackType()
           == C.TRACK_TYPE_VIDEO);
       Assertions.checkState(rendererCapabilities[AUDIO_RENDERER_INDEX].getTrackType()
           == C.TRACK_TYPE_AUDIO);
-      Assertions.checkState(rendererTrackGroupArrays[VIDEO_RENDERER_INDEX].length == 1);
-      Assertions.checkState(rendererTrackGroupArrays[AUDIO_RENDERER_INDEX].length == 1);
+      TrackGroupArray videoTrackGroups = mappedTrackInfo.getTrackGroups(VIDEO_RENDERER_INDEX);
+      TrackGroupArray audioTrackGroups = mappedTrackInfo.getTrackGroups(AUDIO_RENDERER_INDEX);
+      Assertions.checkState(videoTrackGroups.length == 1);
+      Assertions.checkState(audioTrackGroups.length == 1);
       TrackSelection[] selections = new TrackSelection[rendererCapabilities.length];
-      selections[VIDEO_RENDERER_INDEX] = new RandomTrackSelection(
-          rendererTrackGroupArrays[VIDEO_RENDERER_INDEX].get(0),
-          getVideoTrackIndices(rendererTrackGroupArrays[VIDEO_RENDERER_INDEX].get(0),
-              rendererFormatSupports[VIDEO_RENDERER_INDEX][0], videoFormatIds,
-              canIncludeAdditionalVideoFormats),
-          0 /* seed */);
-      selections[AUDIO_RENDERER_INDEX] = new FixedTrackSelection(
-          rendererTrackGroupArrays[AUDIO_RENDERER_INDEX].get(0),
-          getTrackIndex(rendererTrackGroupArrays[AUDIO_RENDERER_INDEX].get(0), audioFormatId));
+      selections[VIDEO_RENDERER_INDEX] =
+          new RandomTrackSelection(
+              videoTrackGroups.get(0),
+              getVideoTrackIndices(
+                  videoTrackGroups.get(0),
+                  mappedTrackInfo.getRendererTrackSupport(VIDEO_RENDERER_INDEX)[0],
+                  videoFormatIds,
+                  canIncludeAdditionalVideoFormats),
+              0 /* seed */);
+      selections[AUDIO_RENDERER_INDEX] =
+          new FixedTrackSelection(
+              audioTrackGroups.get(0), getTrackIndex(audioTrackGroups.get(0), audioFormatId));
       includedAdditionalVideoFormats =
           selections[VIDEO_RENDERER_INDEX].length() > videoFormatIds.length;
       return selections;
