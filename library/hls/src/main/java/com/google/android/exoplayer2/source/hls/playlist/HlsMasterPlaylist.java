@@ -17,12 +17,11 @@ package com.google.android.exoplayer2.source.hls.playlist;
 
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.util.MimeTypes;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Represents an HLS master playlist.
- */
+/** Represents an HLS master playlist. */
 public final class HlsMasterPlaylist extends HlsPlaylist {
 
   /**
@@ -108,6 +107,18 @@ public final class HlsMasterPlaylist extends HlsPlaylist {
         ? Collections.unmodifiableList(muxedCaptionFormats) : null;
   }
 
+  @Override
+  public HlsMasterPlaylist copy(List<RenditionKey> renditionKeys) {
+    return new HlsMasterPlaylist(
+        baseUri,
+        tags,
+        copyRenditionsList(variants, RenditionKey.TYPE_VARIANT, renditionKeys),
+        copyRenditionsList(audios, RenditionKey.TYPE_AUDIO, renditionKeys),
+        copyRenditionsList(subtitles, RenditionKey.TYPE_SUBTITLE, renditionKeys),
+        muxedAudioFormat,
+        muxedCaptionFormats);
+  }
+
   /**
    * Creates a playlist with a single variant.
    *
@@ -119,6 +130,22 @@ public final class HlsMasterPlaylist extends HlsPlaylist {
     List<HlsUrl> emptyList = Collections.emptyList();
     return new HlsMasterPlaylist(null, Collections.<String>emptyList(), variant, emptyList,
         emptyList, null, null);
+  }
+
+  private static List<HlsUrl> copyRenditionsList(
+      List<HlsUrl> renditions, int renditionType, List<RenditionKey> renditionKeys) {
+    List<HlsUrl> copiedRenditions = new ArrayList<>(renditionKeys.size());
+    for (int i = 0; i < renditions.size(); i++) {
+      HlsUrl rendition = renditions.get(i);
+      for (int j = 0; j < renditionKeys.size(); j++) {
+        RenditionKey renditionKey = renditionKeys.get(j);
+        if (renditionKey.type == renditionType && renditionKey.trackIndex == i) {
+          copiedRenditions.add(rendition);
+          break;
+        }
+      }
+    }
+    return copiedRenditions;
   }
 
 }

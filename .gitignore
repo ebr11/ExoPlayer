@@ -40,8 +40,12 @@ proguard-project.txt
 
 # Other
 .DS_Store
+cmake-build-debug
 dist
 tmp
+
+# External native builds
+.externalNativeBuild
 
 # VP9 extension
 extensions/vp9/src/main/jni/libvpx
@@ -64,3 +68,4 @@ extensions/cronet/jniLibs/*
 !extensions/cronet/jniLibs/README.md
 extensions/cronet/libs/*
 !extensions/cronet/libs/README.md
+
