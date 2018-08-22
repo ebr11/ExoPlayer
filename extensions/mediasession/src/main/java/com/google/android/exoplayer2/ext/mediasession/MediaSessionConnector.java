@@ -600,8 +600,9 @@ public final class MediaSessionConnector {
               }
             }
             if (description.getTitle() != null) {
-              builder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE,
-                  String.valueOf(description.getTitle()));
+              String title = String.valueOf(description.getTitle());
+              builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, title);
+              builder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title);
             }
             if (description.getSubtitle() != null) {
               builder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE,
@@ -673,8 +674,8 @@ public final class MediaSessionConnector {
     private int currentWindowCount;
 
     @Override
-    public void onTimelineChanged(Timeline timeline, Object manifest,
-        @Player.TimelineChangeReason int reason) {
+    public void onTimelineChanged(
+        Timeline timeline, @Nullable Object manifest, @Player.TimelineChangeReason int reason) {
       int windowCount = player.getCurrentTimeline().getWindowCount();
       int windowIndex = player.getCurrentWindowIndex();
       if (queueNavigator != null) {

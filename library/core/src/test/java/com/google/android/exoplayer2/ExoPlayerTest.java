@@ -18,6 +18,7 @@ package com.google.android.exoplayer2;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
+import android.support.annotation.Nullable;
 import android.view.Surface;
 import com.google.android.exoplayer2.Player.DefaultEventListener;
 import com.google.android.exoplayer2.Player.EventListener;
@@ -1978,6 +1979,143 @@ public final class ExoPlayerTest {
             new MediaPeriodId(/* periodIndex= */ 1, /* windowSequenceNumber= */ 1),
             new MediaPeriodId(/* periodIndex= */ 1, /* windowSequenceNumber= */ 2))
         .inOrder();
+  }
+
+  @Test
+  public void testRepeatedSeeksToUnpreparedPeriodInSameWindowKeepsWindowSequenceNumber()
+      throws Exception {
+    Timeline timeline =
+        new FakeTimeline(
+            new TimelineWindowDefinition(
+                /* periodCount= */ 2,
+                /* id= */ 0,
+                /* isSeekable= */ true,
+                /* isDynamic= */ false,
+                /* durationUs= */ 10 * C.MICROS_PER_SECOND));
+    FakeMediaSource mediaSource = new FakeMediaSource(timeline, /* manifest= */ null);
+    ActionSchedule actionSchedule =
+        new ActionSchedule.Builder("testSeekToUnpreparedPeriod")
+            .pause()
+            .waitForPlaybackState(Player.STATE_READY)
+            .seek(/* windowIndex= */ 0, /* positionMs= */ 9999)
+            .seek(/* windowIndex= */ 0, /* positionMs= */ 1)
+            .seek(/* windowIndex= */ 0, /* positionMs= */ 9999)
+            .play()
+            .build();
+    ExoPlayerTestRunner testRunner =
+        new ExoPlayerTestRunner.Builder()
+            .setMediaSource(mediaSource)
+            .setActionSchedule(actionSchedule)
+            .build()
+            .start()
+            .blockUntilEnded(TIMEOUT_MS);
+
+    testRunner.assertPlayedPeriodIndices(0, 1, 0, 1);
+    assertThat(mediaSource.getCreatedMediaPeriods())
+        .containsAllOf(
+            new MediaPeriodId(/* periodIndex= */ 0, /* windowSequenceNumber= */ 0),
+            new MediaPeriodId(/* periodIndex= */ 1, /* windowSequenceNumber= */ 0));
+    assertThat(mediaSource.getCreatedMediaPeriods())
+        .doesNotContain(new MediaPeriodId(/* periodIndex= */ 1, /* windowSequenceNumber= */ 1));
+  }
+
+  @Test
+  public void testRecursivePlayerChangesReportConsistentValuesForAllListeners() throws Exception {
+    // We add two listeners to the player. The first stops the player as soon as it's ready and both
+    // record the state change events they receive.
+    final AtomicReference<Player> playerReference = new AtomicReference<>();
+    final List<Integer> eventListener1States = new ArrayList<>();
+    final List<Integer> eventListener2States = new ArrayList<>();
+    final EventListener eventListener1 =
+        new DefaultEventListener() {
+          @Override
+          public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
+            eventListener1States.add(playbackState);
+            if (playbackState == Player.STATE_READY) {
+              playerReference.get().stop(/* reset= */ true);
+            }
+          }
+        };
+    final EventListener eventListener2 =
+        new DefaultEventListener() {
+          @Override
+          public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
+            eventListener2States.add(playbackState);
+          }
+        };
+    ActionSchedule actionSchedule =
+        new ActionSchedule.Builder("testRecursivePlayerChanges")
+            .executeRunnable(
+                new PlayerRunnable() {
+                  @Override
+                  public void run(SimpleExoPlayer player) {
+                    playerReference.set(player);
+                    player.addListener(eventListener1);
+                    player.addListener(eventListener2);
+                  }
+                })
+            .build();
+    new ExoPlayerTestRunner.Builder()
+        .setActionSchedule(actionSchedule)
+        .build()
+        .start()
+        .blockUntilEnded(TIMEOUT_MS);
+
+    assertThat(eventListener1States)
+        .containsExactly(Player.STATE_BUFFERING, Player.STATE_READY, Player.STATE_IDLE)
+        .inOrder();
+    assertThat(eventListener2States)
+        .containsExactly(Player.STATE_BUFFERING, Player.STATE_READY, Player.STATE_IDLE)
+        .inOrder();
+  }
+
+  @Test
+  public void testRecursivePlayerChangesAreReportedInCorrectOrder() throws Exception {
+    // The listener stops the player as soon as it's ready (which should report a timeline and state
+    // change) and sets playWhenReady to false when the timeline callback is received.
+    final AtomicReference<Player> playerReference = new AtomicReference<>();
+    final List<Boolean> eventListenerPlayWhenReady = new ArrayList<>();
+    final List<Integer> eventListenerStates = new ArrayList<>();
+    final EventListener eventListener =
+        new DefaultEventListener() {
+          @Override
+          public void onTimelineChanged(Timeline timeline, @Nullable Object manifest, int reason) {
+            if (timeline.isEmpty()) {
+              playerReference.get().setPlayWhenReady(/* playWhenReady= */ false);
+            }
+          }
+
+          @Override
+          public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
+            eventListenerPlayWhenReady.add(playWhenReady);
+            eventListenerStates.add(playbackState);
+            if (playbackState == Player.STATE_READY) {
+              playerReference.get().stop(/* reset= */ true);
+            }
+          }
+        };
+    ActionSchedule actionSchedule =
+        new ActionSchedule.Builder("testRecursivePlayerChanges")
+            .executeRunnable(
+                new PlayerRunnable() {
+                  @Override
+                  public void run(SimpleExoPlayer player) {
+                    playerReference.set(player);
+                    player.addListener(eventListener);
+                  }
+                })
+            .build();
+    new ExoPlayerTestRunner.Builder()
+        .setActionSchedule(actionSchedule)
+        .build()
+        .start()
+        .blockUntilEnded(TIMEOUT_MS);
+
+    assertThat(eventListenerStates)
+        .containsExactly(
+            Player.STATE_BUFFERING, Player.STATE_READY, Player.STATE_IDLE, Player.STATE_IDLE)
+        .inOrder();
+    assertThat(eventListenerPlayWhenReady).containsExactly(true, true, true, false).inOrder();
   }
 
   // Internal methods.
