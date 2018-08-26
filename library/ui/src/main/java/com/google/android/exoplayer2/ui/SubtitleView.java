@@ -19,13 +19,14 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Canvas;
+import android.support.annotation.Nullable;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.accessibility.CaptioningManager;
 import com.google.android.exoplayer2.text.CaptionStyleCompat;
 import com.google.android.exoplayer2.text.Cue;
-import com.google.android.exoplayer2.text.TextRenderer;
+import com.google.android.exoplayer2.text.TextOutput;
 import com.google.android.exoplayer2.util.Util;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +34,7 @@ import java.util.List;
 /**
  * A view for displaying subtitle {@link Cue}s.
  */
-public final class SubtitleView extends View implements TextRenderer.Output {
+public final class SubtitleView extends View implements TextOutput {
 
   /**
    * The default fractional text size.
@@ -50,14 +51,10 @@ public final class SubtitleView extends View implements TextRenderer.Output {
    */
   public static final float DEFAULT_BOTTOM_PADDING_FRACTION = 0.08f;
 
-  private static final int FRACTIONAL = 0;
-  private static final int FRACTIONAL_IGNORE_PADDING = 1;
-  private static final int ABSOLUTE = 2;
-
   private final List<SubtitlePainter> painters;
 
   private List<Cue> cues;
-  private int textSizeType;
+  private @Cue.TextSizeType int textSizeType;
   private float textSize;
   private boolean applyEmbeddedStyles;
   private boolean applyEmbeddedFontSizes;
@@ -71,7 +68,7 @@ public final class SubtitleView extends View implements TextRenderer.Output {
   public SubtitleView(Context context, AttributeSet attrs) {
     super(context, attrs);
     painters = new ArrayList<>();
-    textSizeType = FRACTIONAL;
+    textSizeType = Cue.TEXT_SIZE_TYPE_FRACTIONAL;
     textSize = DEFAULT_TEXT_SIZE_FRACTION;
     applyEmbeddedStyles = true;
     applyEmbeddedFontSizes = true;
@@ -87,9 +84,9 @@ public final class SubtitleView extends View implements TextRenderer.Output {
   /**
    * Sets the cues to be displayed by the view.
    *
-   * @param cues The cues to display.
+   * @param cues The cues to display, or null to clear the cues.
    */
-  public void setCues(List<Cue> cues) {
+  public void setCues(@Nullable List<Cue> cues) {
     if (this.cues == cues) {
       return;
     }
@@ -119,7 +116,9 @@ public final class SubtitleView extends View implements TextRenderer.Output {
     } else {
       resources = context.getResources();
     }
-    setTextSize(ABSOLUTE, TypedValue.applyDimension(unit, size, resources.getDisplayMetrics()));
+    setTextSize(
+        Cue.TEXT_SIZE_TYPE_ABSOLUTE,
+        TypedValue.applyDimension(unit, size, resources.getDisplayMetrics()));
   }
 
   /**
@@ -153,10 +152,14 @@ public final class SubtitleView extends View implements TextRenderer.Output {
    *     height after the top and bottom padding has been subtracted.
    */
   public void setFractionalTextSize(float fractionOfHeight, boolean ignorePadding) {
-    setTextSize(ignorePadding ? FRACTIONAL_IGNORE_PADDING : FRACTIONAL, fractionOfHeight);
+    setTextSize(
+        ignorePadding
+            ? Cue.TEXT_SIZE_TYPE_FRACTIONAL_IGNORE_PADDING
+            : Cue.TEXT_SIZE_TYPE_FRACTIONAL,
+        fractionOfHeight);
   }
 
-  private void setTextSize(int textSizeType, float textSize) {
+  private void setTextSize(@Cue.TextSizeType int textSizeType, float textSize) {
     if (this.textSizeType == textSizeType && this.textSize == textSize) {
       return;
     }
@@ -254,17 +257,61 @@ public final class SubtitleView extends View implements TextRenderer.Output {
       // No space to draw subtitles.
       return;
     }
+    int rawViewHeight = rawBottom - rawTop;
+    int viewHeightMinusPadding = bottom - top;
 
-    float textSizePx = textSizeType == ABSOLUTE ? textSize
-        : textSize * (textSizeType == FRACTIONAL ? (bottom - top) : (rawBottom - rawTop));
-    if (textSizePx <= 0) {
+    float defaultViewTextSizePx =
+        resolveTextSize(textSizeType, textSize, rawViewHeight, viewHeightMinusPadding);
+    if (defaultViewTextSizePx <= 0) {
       // Text has no height.
       return;
     }
 
     for (int i = 0; i < cueCount; i++) {
-      painters.get(i).draw(cues.get(i), applyEmbeddedStyles, applyEmbeddedFontSizes, style,
-          textSizePx, bottomPaddingFraction, canvas, left, top, right, bottom);
+      Cue cue = cues.get(i);
+      float textSizePx =
+          resolveTextSizeForCue(cue, rawViewHeight, viewHeightMinusPadding, defaultViewTextSizePx);
+      SubtitlePainter painter = painters.get(i);
+      painter.draw(
+          cue,
+          applyEmbeddedStyles,
+          applyEmbeddedFontSizes,
+          style,
+          textSizePx,
+          bottomPaddingFraction,
+          canvas,
+          left,
+          top,
+          right,
+          bottom);
+    }
+  }
+
+  private float resolveTextSizeForCue(
+      Cue cue, int rawViewHeight, int viewHeightMinusPadding, float defaultViewTextSizePx) {
+    if (cue.textSizeType == Cue.TYPE_UNSET || cue.textSize == Cue.DIMEN_UNSET) {
+      return defaultViewTextSizePx;
+    }
+    float defaultCueTextSizePx =
+        resolveTextSize(cue.textSizeType, cue.textSize, rawViewHeight, viewHeightMinusPadding);
+    return defaultCueTextSizePx > 0 ? defaultCueTextSizePx : defaultViewTextSizePx;
+  }
+
+  private float resolveTextSize(
+      @Cue.TextSizeType int textSizeType,
+      float textSize,
+      int rawViewHeight,
+      int viewHeightMinusPadding) {
+    switch (textSizeType) {
+      case Cue.TEXT_SIZE_TYPE_ABSOLUTE:
+        return textSize;
+      case Cue.TEXT_SIZE_TYPE_FRACTIONAL:
+        return textSize * viewHeightMinusPadding;
+      case Cue.TEXT_SIZE_TYPE_FRACTIONAL_IGNORE_PADDING:
+        return textSize * rawViewHeight;
+      case Cue.TYPE_UNSET:
+      default:
+        return Cue.DIMEN_UNSET;
     }
   }
 
