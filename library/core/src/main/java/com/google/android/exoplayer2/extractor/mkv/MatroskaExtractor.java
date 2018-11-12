@@ -370,6 +370,10 @@ public final class MatroskaExtractor implements Extractor {
   private boolean sampleRead;
   private boolean sampleSeenReferenceBlock;
 
+  //Emby mods
+  public static boolean ForceDtsHd = false;
+  //
+
   // Extractor outputs.
   private ExtractorOutput extractorOutput;
 
@@ -1755,7 +1759,7 @@ public final class MatroskaExtractor implements Extractor {
           break;
         case CODEC_ID_DTS:
         case CODEC_ID_DTS_EXPRESS:
-          mimeType = MimeTypes.AUDIO_DTS;
+          mimeType = ForceDtsHd ? MimeTypes.AUDIO_DTS_HD : MimeTypes.AUDIO_DTS;
           break;
         case CODEC_ID_DTS_LOSSLESS:
           mimeType = MimeTypes.AUDIO_DTS_HD;
