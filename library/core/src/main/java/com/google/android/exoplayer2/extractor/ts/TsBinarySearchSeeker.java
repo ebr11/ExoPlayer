@@ -34,7 +34,7 @@ import java.io.IOException;
 
   private static final long SEEK_TOLERANCE_US = 100_000;
   private static final int MINIMUM_SEARCH_RANGE_BYTES = TsExtractor.TS_PACKET_SIZE * 5;
-  private static final int TIMESTAMP_SEARCH_PACKETS = 200;
+  private static final int TIMESTAMP_SEARCH_PACKETS = 300;
   private static final int TIMESTAMP_SEARCH_BYTES =
       TsExtractor.TS_PACKET_SIZE * TIMESTAMP_SEARCH_PACKETS;
 

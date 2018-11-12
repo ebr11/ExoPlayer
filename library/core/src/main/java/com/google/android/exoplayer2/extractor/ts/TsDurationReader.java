@@ -35,7 +35,7 @@ import java.io.IOException;
  */
 /* package */ final class TsDurationReader {
 
-  private static final int DURATION_READ_PACKETS = 200;
+  private static final int DURATION_READ_PACKETS = 300;
   private static final int DURATION_READ_BYTES = TsExtractor.TS_PACKET_SIZE * DURATION_READ_PACKETS;
 
   private final TimestampAdjuster pcrTimestampAdjuster;
