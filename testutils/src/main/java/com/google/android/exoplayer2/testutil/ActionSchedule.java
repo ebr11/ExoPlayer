@@ -41,6 +41,7 @@ import com.google.android.exoplayer2.testutil.Action.SetShuffleModeEnabled;
 import com.google.android.exoplayer2.testutil.Action.SetVideoSurface;
 import com.google.android.exoplayer2.testutil.Action.Stop;
 import com.google.android.exoplayer2.testutil.Action.ThrowPlaybackException;
+import com.google.android.exoplayer2.testutil.Action.WaitForIsLoading;
 import com.google.android.exoplayer2.testutil.Action.WaitForPlaybackState;
 import com.google.android.exoplayer2.testutil.Action.WaitForPositionDiscontinuity;
 import com.google.android.exoplayer2.testutil.Action.WaitForSeekProcessed;
@@ -376,13 +377,22 @@ public final class ActionSchedule {
     }
 
     /**
+     * Schedules a delay until any timeline change.
+     *
+     * @return The builder, for convenience.
+     */
+    public Builder waitForTimelineChanged() {
+      return apply(new WaitForTimelineChanged(tag, /* expectedTimeline= */ null));
+    }
+
+    /**
      * Schedules a delay until the timeline changed to a specified expected timeline.
      *
      * @param expectedTimeline The expected timeline to wait for. If null, wait for any timeline
      *     change.
      * @return The builder, for convenience.
      */
-    public Builder waitForTimelineChanged(@Nullable Timeline expectedTimeline) {
+    public Builder waitForTimelineChanged(Timeline expectedTimeline) {
       return apply(new WaitForTimelineChanged(tag, expectedTimeline));
     }
 
@@ -403,6 +413,16 @@ public final class ActionSchedule {
      */
     public Builder waitForPlaybackState(int targetPlaybackState) {
       return apply(new WaitForPlaybackState(tag, targetPlaybackState));
+    }
+
+    /**
+     * Schedules a delay until {@code player.isLoading()} changes to the specified value.
+     *
+     * @param targetIsLoading The target value of {@code player.isLoading()}.
+     * @return The builder, for convenience.
+     */
+    public Builder waitForIsLoading(boolean targetIsLoading) {
+      return apply(new WaitForIsLoading(tag, targetIsLoading));
     }
 
     /**
@@ -447,7 +467,8 @@ public final class ActionSchedule {
     private SimpleExoPlayer player;
 
     /** Handles the message send to the component and additionally provides access to the player. */
-    public abstract void handleMessage(SimpleExoPlayer player, int messageType, Object message);
+    public abstract void handleMessage(
+        SimpleExoPlayer player, int messageType, @Nullable Object message);
 
     /** Sets the player to be passed to {@link #handleMessage(SimpleExoPlayer, int, Object)}. */
     /* package */ void setPlayer(SimpleExoPlayer player) {
@@ -455,7 +476,8 @@ public final class ActionSchedule {
     }
 
     @Override
-    public final void handleMessage(int messageType, Object message) throws ExoPlaybackException {
+    public final void handleMessage(int messageType, @Nullable Object message)
+        throws ExoPlaybackException {
       handleMessage(player, messageType, message);
     }
   }
@@ -610,13 +632,7 @@ public final class ActionSchedule {
         ActionNode nextAction) {
       Assertions.checkArgument(nextAction == null);
       if (callback != null) {
-        handler.post(
-            new Runnable() {
-              @Override
-              public void run() {
-                callback.onActionScheduleFinished();
-              }
-            });
+        handler.post(() -> callback.onActionScheduleFinished());
       }
     }
 

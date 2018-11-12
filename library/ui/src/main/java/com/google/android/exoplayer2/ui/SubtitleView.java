@@ -206,8 +206,10 @@ public final class SubtitleView extends View implements TextOutput {
    * {@link CaptioningManager#getUserStyle()}, or to a default style before API level 19.
    */
   public void setUserDefaultStyle() {
-    setStyle(Util.SDK_INT >= 19 && !isInEditMode()
-        ? getUserCaptionStyleV19() : CaptionStyleCompat.DEFAULT);
+    setStyle(
+        Util.SDK_INT >= 19 && isCaptionManagerEnabled() && !isInEditMode()
+            ? getUserCaptionStyleV19()
+            : CaptionStyleCompat.DEFAULT);
   }
 
   /**
@@ -245,19 +247,17 @@ public final class SubtitleView extends View implements TextOutput {
   @Override
   public void dispatchDraw(Canvas canvas) {
     int cueCount = (cues == null) ? 0 : cues.size();
-    int rawTop = getTop();
-    int rawBottom = getBottom();
+    int rawViewHeight = getHeight();
 
-    // Calculate the bounds after padding is taken into account.
-    int left = getLeft() + getPaddingLeft();
-    int top = rawTop + getPaddingTop();
-    int right = getRight() + getPaddingRight();
-    int bottom = rawBottom - getPaddingBottom();
+    // Calculate the cue box bounds relative to the canvas after padding is taken into account.
+    int left = getPaddingLeft();
+    int top = getPaddingTop();
+    int right = getWidth() - getPaddingRight();
+    int bottom = rawViewHeight - getPaddingBottom();
     if (bottom <= top || right <= left) {
       // No space to draw subtitles.
       return;
     }
-    int rawViewHeight = rawBottom - rawTop;
     int viewHeightMinusPadding = bottom - top;
 
     float defaultViewTextSizePx =
@@ -269,15 +269,15 @@ public final class SubtitleView extends View implements TextOutput {
 
     for (int i = 0; i < cueCount; i++) {
       Cue cue = cues.get(i);
-      float textSizePx =
-          resolveTextSizeForCue(cue, rawViewHeight, viewHeightMinusPadding, defaultViewTextSizePx);
+      float cueTextSizePx = resolveCueTextSize(cue, rawViewHeight, viewHeightMinusPadding);
       SubtitlePainter painter = painters.get(i);
       painter.draw(
           cue,
           applyEmbeddedStyles,
           applyEmbeddedFontSizes,
           style,
-          textSizePx,
+          defaultViewTextSizePx,
+          cueTextSizePx,
           bottomPaddingFraction,
           canvas,
           left,
@@ -287,14 +287,13 @@ public final class SubtitleView extends View implements TextOutput {
     }
   }
 
-  private float resolveTextSizeForCue(
-      Cue cue, int rawViewHeight, int viewHeightMinusPadding, float defaultViewTextSizePx) {
+  private float resolveCueTextSize(Cue cue, int rawViewHeight, int viewHeightMinusPadding) {
     if (cue.textSizeType == Cue.TYPE_UNSET || cue.textSize == Cue.DIMEN_UNSET) {
-      return defaultViewTextSizePx;
+      return 0;
     }
     float defaultCueTextSizePx =
         resolveTextSize(cue.textSizeType, cue.textSize, rawViewHeight, viewHeightMinusPadding);
-    return defaultCueTextSizePx > 0 ? defaultCueTextSizePx : defaultViewTextSizePx;
+    return Math.max(defaultCueTextSizePx, 0);
   }
 
   private float resolveTextSize(
@@ -313,6 +312,13 @@ public final class SubtitleView extends View implements TextOutput {
       default:
         return Cue.DIMEN_UNSET;
     }
+  }
+
+  @TargetApi(19)
+  private boolean isCaptionManagerEnabled() {
+    CaptioningManager captioningManager =
+        (CaptioningManager) getContext().getSystemService(Context.CAPTIONING_SERVICE);
+    return captioningManager.isEnabled();
   }
 
   @TargetApi(19)

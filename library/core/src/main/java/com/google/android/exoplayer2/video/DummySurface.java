@@ -30,11 +30,11 @@ import android.os.Handler.Callback;
 import android.os.HandlerThread;
 import android.os.Message;
 import android.support.annotation.Nullable;
-import android.util.Log;
 import android.view.Surface;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.EGLSurfaceTexture;
 import com.google.android.exoplayer2.util.EGLSurfaceTexture.SecureMode;
+import com.google.android.exoplayer2.util.Log;
 import com.google.android.exoplayer2.util.Util;
 import javax.microedition.khronos.egl.EGL10;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
@@ -156,7 +156,7 @@ public final class DummySurface extends Surface {
     private static final int MSG_INIT = 1;
     private static final int MSG_RELEASE = 2;
 
-    private @MonotonicNonNull EGLSurfaceTexture eglSurfaceTexure;
+    private @MonotonicNonNull EGLSurfaceTexture eglSurfaceTexture;
     private @MonotonicNonNull Handler handler;
     private @Nullable Error initError;
     private @Nullable RuntimeException initException;
@@ -169,7 +169,7 @@ public final class DummySurface extends Surface {
     public DummySurface init(@SecureMode int secureMode) {
       start();
       handler = new Handler(getLooper(), /* callback= */ this);
-      eglSurfaceTexure = new EGLSurfaceTexture(handler);
+      eglSurfaceTexture = new EGLSurfaceTexture(handler);
       boolean wasInterrupted = false;
       synchronized (this) {
         handler.obtainMessage(MSG_INIT, secureMode, 0).sendToTarget();
@@ -232,16 +232,16 @@ public final class DummySurface extends Surface {
     }
 
     private void initInternal(@SecureMode int secureMode) {
-      Assertions.checkNotNull(eglSurfaceTexure);
-      eglSurfaceTexure.init(secureMode);
+      Assertions.checkNotNull(eglSurfaceTexture);
+      eglSurfaceTexture.init(secureMode);
       this.surface =
           new DummySurface(
-              this, eglSurfaceTexure.getSurfaceTexture(), secureMode != SECURE_MODE_NONE);
+              this, eglSurfaceTexture.getSurfaceTexture(), secureMode != SECURE_MODE_NONE);
     }
 
     private void releaseInternal() {
-      Assertions.checkNotNull(eglSurfaceTexure);
-      eglSurfaceTexure.release();
+      Assertions.checkNotNull(eglSurfaceTexture);
+      eglSurfaceTexture.release();
     }
 
   }

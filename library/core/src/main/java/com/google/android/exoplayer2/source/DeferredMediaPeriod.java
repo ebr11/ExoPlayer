@@ -24,10 +24,10 @@ import com.google.android.exoplayer2.upstream.Allocator;
 import java.io.IOException;
 
 /**
- * Media period that wraps a media source and defers calling its
- * {@link MediaSource#createPeriod(MediaPeriodId, Allocator)} method until {@link #createPeriod()}
- * has been called. This is useful if you need to return a media period immediately but the media
- * source that should create it is not yet prepared.
+ * Media period that wraps a media source and defers calling its {@link
+ * MediaSource#createPeriod(MediaPeriodId, Allocator)} method until {@link
+ * #createPeriod(MediaPeriodId)} has been called. This is useful if you need to return a media
+ * period immediately but the media source that should create it is not yet prepared.
  */
 public final class DeferredMediaPeriod implements MediaPeriod, MediaPeriod.Callback {
 
@@ -40,7 +40,9 @@ public final class DeferredMediaPeriod implements MediaPeriod, MediaPeriod.Callb
     void onPrepareError(MediaPeriodId mediaPeriodId, IOException exception);
   }
 
+  /** The {@link MediaSource} which will create the actual media period. */
   public final MediaSource mediaSource;
+  /** The {@link MediaPeriodId} used to create the deferred media period. */
   public final MediaPeriodId id;
 
   private final Allocator allocator;
@@ -56,7 +58,7 @@ public final class DeferredMediaPeriod implements MediaPeriod, MediaPeriod.Callb
    * Creates a new deferred media period.
    *
    * @param mediaSource The media source to wrap.
-   * @param id The identifier for the media period to create when {@link #createPeriod()} is called.
+   * @param id The identifier used to create the deferred media period.
    * @param allocator The allocator used to create the media period.
    */
   public DeferredMediaPeriod(MediaSource mediaSource, MediaPeriodId id, Allocator allocator) {
@@ -77,33 +79,35 @@ public final class DeferredMediaPeriod implements MediaPeriod, MediaPeriod.Callb
     this.listener = listener;
   }
 
+  /** Returns the position at which the deferred media period was prepared, in microseconds. */
+  public long getPreparePositionUs() {
+    return preparePositionUs;
+  }
+
   /**
-   * Sets the default prepare position at which to prepare the media period. This value is only used
-   * if the call to {@link MediaPeriod#prepare(Callback, long)} is being deferred and the call was
-   * made with a (presumably default) prepare position of 0.
+   * Overrides the default prepare position at which to prepare the media period. This value is only
+   * used if the call to {@link MediaPeriod#prepare(Callback, long)} is being deferred.
    *
-   * <p>Note that this will override an intentional seek to zero in the corresponding non-seekable
-   * timeline window. This is unlikely to be a problem as a non-zero default position usually only
-   * occurs for live playbacks and seeking to zero in a live window would cause
-   * BehindLiveWindowExceptions anyway.
-   *
-   * @param defaultPreparePositionUs The actual default prepare position, in microseconds.
+   * @param defaultPreparePositionUs The default prepare position to use, in microseconds.
    */
-  public void setDefaultPreparePositionUs(long defaultPreparePositionUs) {
-    if (preparePositionUs == 0 && defaultPreparePositionUs != 0) {
-      preparePositionOverrideUs = defaultPreparePositionUs;
-      preparePositionUs = defaultPreparePositionUs;
-    }
+  public void overridePreparePositionUs(long defaultPreparePositionUs) {
+    preparePositionOverrideUs = defaultPreparePositionUs;
   }
 
   /**
    * Calls {@link MediaSource#createPeriod(MediaPeriodId, Allocator)} on the wrapped source then
    * prepares it if {@link #prepare(Callback, long)} has been called. Call {@link #releasePeriod()}
    * to release the period.
+   *
+   * @param id The identifier that should be used to create the media period from the media source.
    */
-  public void createPeriod() {
+  public void createPeriod(MediaPeriodId id) {
     mediaPeriod = mediaSource.createPeriod(id, allocator);
     if (callback != null) {
+      long preparePositionUs =
+          preparePositionOverrideUs != C.TIME_UNSET
+              ? preparePositionOverrideUs
+              : this.preparePositionUs;
       mediaPeriod.prepare(this, preparePositionUs);
     }
   }
@@ -153,7 +157,7 @@ public final class DeferredMediaPeriod implements MediaPeriod, MediaPeriod.Callb
   @Override
   public long selectTracks(TrackSelection[] selections, boolean[] mayRetainStreamFlags,
       SampleStream[] streams, boolean[] streamResetFlags, long positionUs) {
-    if (preparePositionOverrideUs != C.TIME_UNSET && positionUs == 0) {
+    if (preparePositionOverrideUs != C.TIME_UNSET && positionUs == preparePositionUs) {
       positionUs = preparePositionOverrideUs;
       preparePositionOverrideUs = C.TIME_UNSET;
     }
